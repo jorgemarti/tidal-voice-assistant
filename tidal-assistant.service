@@ -1,0 +1,29 @@
+[Unit]
+Description=Tidal Voice Assistant
+After=network-online.target sound.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=pi
+Group=pi
+WorkingDirectory=/home/pi/tidal-voice-assistant
+Environment="PATH=/home/pi/tidal-voice-assistant/venv/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
+
+# Load environment variables
+EnvironmentFile=/home/pi/tidal-voice-assistant/.env
+
+# Run the main application
+ExecStart=/home/pi/tidal-voice-assistant/venv/bin/python /home/pi/tidal-voice-assistant/main.py
+
+# Restart on failure
+Restart=on-failure
+RestartSec=10
+
+# Logging
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=tidal-assistant
+
+[Install]
+WantedBy=multi-user.target

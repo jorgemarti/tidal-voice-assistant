@@ -1,0 +1,20 @@
+# Speech recognition (offline) - also used for wake word detection
+vosk==0.3.45
+
+# Audio capture
+pyaudio==0.2.14
+
+# Tidal API integration
+tidalapi==0.7.6
+
+# Chromecast protocol
+pychromecast==14.0.1
+
+# Environment variables
+python-dotenv==1.0.0
+
+# Utilities
+requests==2.31.0
+
+# Text-to-speech for testing (optional)
+gtts==2.5.0
