@@ -6,7 +6,9 @@ import pyaudio
 from vosk import Model, KaldiRecognizer
 import json
 from pathlib import Path
-from config import VOSK_MODEL_PATH, SAMPLE_RATE, SPEECH_TIMEOUT, CHUNK_SIZE
+from config import VOSK_MODEL_PATH, SAMPLE_RATE, SPEECH_TIMEOUT, CHUNK_SIZE, setup_logging
+
+logger = setup_logging(__name__)
 
 class SpeechRecognizer:
     """
@@ -26,7 +28,7 @@ class SpeechRecognizer:
             # Use shared model instance
             self.model = model
             self._owns_model = False
-            print("Using shared Vosk model for speech recognition")
+            logger.info("Using shared Vosk model for speech recognition")
         else:
             model_path = model_path or VOSK_MODEL_PATH
             model_dir = Path(model_path)
@@ -40,7 +42,7 @@ class SpeechRecognizer:
                     "mv vosk-model-small-es-0.42 vosk-model-es"
                 )
 
-            print(f"Loading Spanish speech recognition model from: {model_path}")
+            logger.info(f"Loading Spanish speech recognition model from: {model_path}")
             self.model = Model(str(model_dir))
             self._owns_model = True
 
@@ -49,7 +51,7 @@ class SpeechRecognizer:
         # Initialize PyAudio once and reuse
         self.audio = pyaudio.PyAudio()
 
-        print("✅ Spanish speech recognizer initialized")
+        logger.info("Spanish speech recognizer initialized")
     
     def listen_for_command(self, timeout=None):
         """
@@ -72,7 +74,7 @@ class SpeechRecognizer:
         )
         stream.start_stream()
 
-        print(f"🎤 Listening for command (timeout: {timeout}s)...")
+        logger.info(f"Listening for command (timeout: {timeout}s)...")
 
         frames_read = 0
         max_frames = int(timeout * SAMPLE_RATE / CHUNK_SIZE)
@@ -87,7 +89,7 @@ class SpeechRecognizer:
                     text = result.get('text', '').strip()
 
                     if text:
-                        print(f"✅ Recognized: '{text}'")
+                        logger.info(f"Recognized: '{text}'")
                         return text
 
             # Get partial result if timeout reached
@@ -95,14 +97,14 @@ class SpeechRecognizer:
             text = result.get('text', '').strip()
 
             if text:
-                print(f"✅ Recognized (partial): '{text}'")
+                logger.info(f"Recognized (partial): '{text}'")
             else:
-                print("⚠️  No speech detected")
+                logger.warning("No speech detected")
 
             return text
 
         except Exception as e:
-            print(f"❌ Error during speech recognition: {e}")
+            logger.error(f"Error during speech recognition: {e}")
             return ""
         finally:
             stream.stop_stream()
@@ -124,7 +126,7 @@ class SpeechRecognizer:
             frames_per_buffer=CHUNK_SIZE
         )
 
-        print("🎤 Listening continuously... (Press Ctrl+C to stop)")
+        logger.info("Listening continuously... (Press Ctrl+C to stop)")
 
         try:
             while True:
@@ -138,7 +140,7 @@ class SpeechRecognizer:
                         callback(text)
 
         except KeyboardInterrupt:
-            print("\n⚠️  Continuous listening stopped")
+            logger.warning("Continuous listening stopped")
         finally:
             stream.stop_stream()
             stream.close()
@@ -148,7 +150,7 @@ class SpeechRecognizer:
         if hasattr(self, 'audio') and self.audio:
             self.audio.terminate()
             self.audio = None
-        print("Speech recognizer cleaned up")
+        logger.info("Speech recognizer cleaned up")
 
 if __name__ == "__main__":
     """Test Spanish speech recognition"""

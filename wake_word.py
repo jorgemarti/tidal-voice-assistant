@@ -6,7 +6,9 @@ import pyaudio
 from vosk import Model, KaldiRecognizer
 import json
 from pathlib import Path
-from config import VOSK_MODEL_PATH, SAMPLE_RATE, CHUNK_SIZE
+from config import VOSK_MODEL_PATH, SAMPLE_RATE, CHUNK_SIZE, setup_logging
+
+logger = setup_logging(__name__)
 
 class WakeWordDetector:
     """
@@ -39,7 +41,7 @@ class WakeWordDetector:
         self.wake_phrases = wake_phrases or ['hey tidal', 'oye tidal']
         self.wake_phrases = [phrase.lower().strip() for phrase in self.wake_phrases]
 
-        print(f"Loading Vosk model for wake word detection from: {model_path}")
+        logger.info(f"Loading Vosk model for wake word detection from: {model_path}")
         self.model = Model(str(model_dir))
         self.recognizer = KaldiRecognizer(self.model, SAMPLE_RATE)
 
@@ -52,9 +54,9 @@ class WakeWordDetector:
             frames_per_buffer=CHUNK_SIZE
         )
 
-        print(f"✅ Wake word detector initialized (Vosk-based, fully offline)")
-        print(f"   Listening for: {', '.join(self.wake_phrases)}")
-        print(f"   Sample rate: {SAMPLE_RATE} Hz")
+        logger.info("Wake word detector initialized (Vosk-based, fully offline)")
+        logger.info(f"Listening for: {', '.join(self.wake_phrases)}")
+        logger.debug(f"Sample rate: {SAMPLE_RATE} Hz")
 
     def get_model(self):
         """
@@ -98,13 +100,13 @@ class WakeWordDetector:
                     text = result.get('text', '').strip()
 
                     if text and self._contains_wake_phrase(text):
-                        print(f"🎤 Wake word detected! (heard: '{text}')")
+                        logger.info(f"Wake word detected! (heard: '{text}')")
                         # Reset recognizer for next detection
                         self.recognizer = KaldiRecognizer(self.model, SAMPLE_RATE)
                         return True
 
         except KeyboardInterrupt:
-            print("\n⚠️  Wake word detection interrupted")
+            logger.warning("Wake word detection interrupted")
             return False
 
     def cleanup(self):
@@ -114,7 +116,7 @@ class WakeWordDetector:
             self.audio_stream.close()
         if hasattr(self, 'audio') and self.audio:
             self.audio.terminate()
-        print("Wake word detector cleaned up")
+        logger.info("Wake word detector cleaned up")
 
     def __enter__(self):
         return self

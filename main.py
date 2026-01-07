@@ -8,14 +8,16 @@ from wake_word import WakeWordDetector
 from speech_recognition import SpeechRecognizer
 from command_parser import MusicCommandParser
 from tidal_player import TidalPlayer
-import time
+from config import setup_logging
 import sys
+
+logger = setup_logging(__name__)
 
 def print_banner():
     """Print application banner"""
     print()
     print("=" * 60)
-    print("🎵 Tidal Voice Assistant for Raspberry Pi")
+    print("  Tidal Voice Assistant for Raspberry Pi")
     print("=" * 60)
     print()
 
@@ -41,108 +43,90 @@ def main():
 
     try:
         # Initialize components
-        print("Initializing components...")
-        print()
+        logger.info("Initializing components...")
 
         wake_detector = WakeWordDetector()
         # Share the Vosk model to save RAM (~250MB)
         speech_recognizer = SpeechRecognizer(model=wake_detector.get_model())
         command_parser = MusicCommandParser()
         tidal_player = TidalPlayer()
-        
+
+        logger.info("All components initialized successfully")
         print()
         print("=" * 60)
-        print("✅ All components initialized successfully!")
+        print("  All components initialized successfully!")
         print("=" * 60)
         print()
-        
+
         print_instructions()
-        print("🎤 Ready! Listening for wake word...")
+        logger.info("Ready! Listening for wake word...")
         print()
-        
+
         # Main loop
         while True:
             try:
                 # Wait for wake word
                 wake_detected = wake_detector.listen()
-                
+
                 if not wake_detected:
                     continue
-                
+
                 # Listen for command
                 command_text = speech_recognizer.listen_for_command()
-                
+
                 if not command_text:
-                    print("⚠️  No command detected, listening for wake word again...")
-                    print()
+                    logger.warning("No command detected, listening for wake word again...")
                     continue
-                
-                print(f"📝 Command: '{command_text}'")
-                
+
+                logger.info(f"Command received: '{command_text}'")
+
                 # Parse command
                 parsed = command_parser.parse(command_text)
-                
+
                 if not parsed:
-                    print("❌ Could not understand music command")
-                    print("   Try: 'reproduce [canción]' or 'pon música de [artista]'")
-                    print()
+                    logger.warning("Could not understand music command")
+                    print("Try: 'reproduce [canción]' or 'pon música de [artista]'")
                     continue
-                
-                print(f"🎯 Action: {parsed['action']}")
-                print(f"🔍 Query: '{parsed['query']}'")
-                print()
-                
+
+                logger.info(f"Parsed action: {parsed['action']}, query: '{parsed['query']}'")
+
                 # Execute
                 search_type = command_parser.get_search_type(parsed['action'])
                 success = tidal_player.search_and_play(parsed['query'], search_type)
-                
+
                 if success:
-                    print()
-                    print("✅ Music is playing!")
+                    logger.info("Music is playing!")
                 else:
-                    print()
-                    print("❌ Could not play music")
-                
-                print()
-                print("🎤 Listening for wake word...")
-                print()
-                
+                    logger.error("Could not play music")
+
+                logger.info("Listening for wake word...")
+
             except KeyboardInterrupt:
                 raise  # Re-raise to exit cleanly
             except Exception as e:
-                print(f"❌ Error processing command: {e}")
-                print("🎤 Listening for wake word...")
-                print()
+                logger.error(f"Error processing command: {e}")
+                logger.info("Listening for wake word...")
                 continue
-    
+
     except KeyboardInterrupt:
         print()
-        print()
-        print("=" * 60)
-        print("Shutting down...")
-        print("=" * 60)
+        logger.info("Shutting down...")
         wake_detector.cleanup()
         speech_recognizer.cleanup()
         tidal_player.cleanup()
-        print("✅ Goodbye!")
-        print()
-        
+        logger.info("Goodbye!")
+
     except FileNotFoundError as e:
-        print()
-        print(f"❌ Error: {e}")
+        logger.error(f"Configuration error: {e}")
         print()
         print("Make sure you have:")
         print("  1. Downloaded the Spanish Vosk model")
         print("  2. Set up your .env file with credentials")
         print()
         sys.exit(1)
-        
+
     except Exception as e:
-        print()
-        print(f"❌ Fatal error: {e}")
-        print()
-        import traceback
-        traceback.print_exc()
+        logger.critical(f"Fatal error: {e}", exc_info=True)
         sys.exit(1)
 
 if __name__ == "__main__":

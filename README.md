@@ -333,6 +333,20 @@ pip install --upgrade pip
 pip install -r requirements.txt
 ```
 
+## 📊 Logging
+
+Set the log level in your `.env` file:
+
+```bash
+LOG_LEVEL=INFO      # Default - normal operation
+LOG_LEVEL=DEBUG     # Verbose output for troubleshooting
+LOG_LEVEL=WARNING   # Only warnings and errors
+```
+
+**Where to see logs:**
+- **Manual run**: Logs appear in the terminal
+- **As a service**: Use `journalctl -u tidal-assistant -f`
+
 ## 🔐 Security Notes
 
 - Never commit `.env` file to version control
