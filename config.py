@@ -3,10 +3,47 @@ Configuration file for Tidal Voice Assistant
 """
 
 import os
+import logging
+import sys
 from dotenv import load_dotenv
 
 # Load environment variables from .env file
 load_dotenv()
+
+# Logging Configuration
+LOG_LEVEL = os.getenv('LOG_LEVEL', 'INFO').upper()
+LOG_FORMAT = '%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+LOG_DATE_FORMAT = '%Y-%m-%d %H:%M:%S'
+
+def setup_logging(name=None):
+    """
+    Set up logging for the application.
+
+    Args:
+        name: Logger name (default: root logger)
+
+    Returns:
+        Logger instance
+    """
+    logger = logging.getLogger(name)
+
+    # Only configure if not already configured
+    if not logger.handlers:
+        logger.setLevel(getattr(logging, LOG_LEVEL, logging.INFO))
+
+        # Console handler with formatting
+        handler = logging.StreamHandler(sys.stdout)
+        handler.setLevel(getattr(logging, LOG_LEVEL, logging.INFO))
+        formatter = logging.Formatter(LOG_FORMAT, datefmt=LOG_DATE_FORMAT)
+        handler.setFormatter(formatter)
+        logger.addHandler(handler)
+
+    return logger
+
+# Retry Configuration
+RETRY_MAX_ATTEMPTS = 3
+RETRY_DELAY_SECONDS = 2
+RETRY_BACKOFF_MULTIPLIER = 2
 
 # Tidal Configuration
 TIDAL_CONFIG = {

@@ -18,7 +18,7 @@ tidal-voice-assistant/
 ├── main.py                      # Main application entry point
 │
 ├── tidal_auth.py               # Tidal OAuth authentication
-├── wake_word.py                # Wake word detection (Porcupine)
+├── wake_word.py                # Wake word detection (Vosk)
 ├── speech_recognition.py       # Spanish speech-to-text (Vosk)
 ├── command_parser.py           # Parse Spanish music commands
 ├── tidal_player.py             # Tidal API + Chromecast integration
@@ -136,6 +136,7 @@ tidal-voice-assistant/
 - Methods:
   - `__init__()`: Initialize Vosk recognizer
   - `listen()`: Block until wake word detected
+  - `get_model()`: Return Vosk model for sharing with other components
   - `cleanup()`: Release resources
 - Default wake phrases: "hey tidal", "oye tidal"
 - No external API dependencies
@@ -145,10 +146,12 @@ tidal-voice-assistant/
 - Offline Spanish speech recognition using Vosk
 - Class: `SpeechRecognizer`
 - Methods:
-  - `__init__()`: Load Spanish model
+  - `__init__(model=None)`: Load Spanish model or use shared model
   - `listen_for_command()`: Capture and transcribe
   - `listen_continuous()`: Continuous mode (optional)
+  - `cleanup()`: Release audio resources
 - Uses: vosk-model-small-es-0.42
+- Supports model sharing with wake_word.py to save ~250MB RAM
 - Timeout configurable (default: 5 seconds)
 
 **command_parser.py**
@@ -167,13 +170,14 @@ tidal-voice-assistant/
 - Tidal API integration and Chromecast casting
 - Class: `TidalPlayer`
 - Methods:
-  - `find_chromecast()`: Discover device on network
+  - `find_chromecast()`: Discover device on network (with 10s timeout)
   - `search_tidal()`: Search by query and type
   - `play_track()`: Play single track
   - `play_artist_top_tracks()`: Play artist's top songs
   - `play_album()`: Play album
   - `search_and_play()`: Combined search and play
   - `stop()`, `pause()`, `play()`: Playback control
+  - `cleanup()`: Release Chromecast browser resources
 - Integrates: tidalapi + pychromecast
 
 ### Testing Utilities
@@ -249,9 +253,7 @@ tidal-voice-assistant/
 
 **.env**
 - Environment variables (created from .env.example)
-- Contains credentials:
-  - Picovoice API key
-  - Tidal username/password
+- Contains Tidal credentials (username/password)
 - **Important**: Keep private, don't commit
 
 ## Data Flow

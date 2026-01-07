@@ -56,6 +56,15 @@ class WakeWordDetector:
         print(f"   Listening for: {', '.join(self.wake_phrases)}")
         print(f"   Sample rate: {SAMPLE_RATE} Hz")
 
+    def get_model(self):
+        """
+        Get the Vosk model instance for sharing with other components.
+
+        Returns:
+            Vosk Model instance
+        """
+        return self.model
+
     def _contains_wake_phrase(self, text):
         """
         Check if text contains any of the wake phrases.

@@ -39,8 +39,7 @@ Jorge has a Google Nest Mini (2nd gen) that he uses for:
 
 ### Software Stack
 - **Python 3.9+**
-- **Vosk**: Offline speech recognition (Spanish model)
-- **Pvporcupine**: Wake word detection
+- **Vosk**: Offline speech recognition and wake word detection (Spanish model)
 - **tidalapi**: Tidal API integration
 - **pychromecast**: Google Cast protocol for streaming to Nest Mini
 - **pyaudio**: Audio capture
@@ -131,7 +130,7 @@ TIDAL_CONFIG = {
     'session_file': 'tidal_session.json'
 }
 
-CHROMECAST_NAME = "Living Room"  # User's Nest Mini name
+CHROMECAST_NAME = "Altavoz Google"  # User's Nest Mini name
 ```
 
 ## Usage Flow
@@ -222,8 +221,7 @@ For non-music commands, user continues using:
 
 ### System Packages
 ```bash
-portaudio19-dev     # Audio I/O
-python3-pyaudio     # Python audio bindings
+portaudio19-dev     # Audio I/O (pyaudio installed via pip)
 ```
 
 ### Python Packages

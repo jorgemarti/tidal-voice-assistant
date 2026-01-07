@@ -22,7 +22,7 @@ def print_banner():
 def print_instructions():
     """Print usage instructions"""
     print("Instructions:")
-    print("  1. Say 'Porcupine' (wake word)")
+    print("  1. Say 'Hey Tidal' or 'Oye Tidal' (wake word)")
     print("  2. Speak your music command in Spanish:")
     print("     - 'reproduce bohemian rhapsody'")
     print("     - 'pon música de queen'")
@@ -38,14 +38,15 @@ def print_instructions():
 def main():
     """Main application loop"""
     print_banner()
-    
+
     try:
         # Initialize components
         print("Initializing components...")
         print()
-        
+
         wake_detector = WakeWordDetector()
-        speech_recognizer = SpeechRecognizer()
+        # Share the Vosk model to save RAM (~250MB)
+        speech_recognizer = SpeechRecognizer(model=wake_detector.get_model())
         command_parser = MusicCommandParser()
         tidal_player = TidalPlayer()
         
@@ -121,6 +122,8 @@ def main():
         print("Shutting down...")
         print("=" * 60)
         wake_detector.cleanup()
+        speech_recognizer.cleanup()
+        tidal_player.cleanup()
         print("✅ Goodbye!")
         print()
         

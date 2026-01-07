@@ -29,23 +29,32 @@ def get_local_ip():
         s.close()
     return ip
 
+class DirectoryHTTPRequestHandler(http.server.SimpleHTTPRequestHandler):
+    """HTTP handler that serves from a specific directory"""
+
+    def __init__(self, *args, directory=None, **kwargs):
+        self.serve_directory = directory
+        super().__init__(*args, directory=directory, **kwargs)
+
+
 class SimpleHTTPServerThread(threading.Thread):
     """Simple HTTP server to serve audio files to Chromecast"""
-    
+
     def __init__(self, directory, port=8000):
         super().__init__(daemon=True)
         self.directory = directory
         self.port = port
         self.httpd = None
-        
+
     def run(self):
         """Start HTTP server"""
-        os.chdir(self.directory)
-        handler = http.server.SimpleHTTPRequestHandler
+        handler = lambda *args, **kwargs: DirectoryHTTPRequestHandler(
+            *args, directory=self.directory, **kwargs
+        )
         self.httpd = socketserver.TCPServer(("", self.port), handler)
         print(f"   HTTP server started on port {self.port}")
         self.httpd.serve_forever()
-    
+
     def stop(self):
         """Stop HTTP server"""
         if self.httpd:
@@ -56,9 +65,9 @@ def discover_chromecasts():
     print("🔍 Discovering Chromecast devices on network...")
     print("   (This may take up to 30 seconds)")
     print()
-    
+
     chromecasts, browser = pychromecast.get_chromecasts()
-    
+
     if not chromecasts:
         print("❌ No Chromecast devices found")
         print()
@@ -66,18 +75,20 @@ def discover_chromecasts():
         print("  1. Ensure devices are on same WiFi network")
         print("  2. Check firewall settings")
         print("  3. Restart Chromecast devices")
+        browser.stop_discovery()
         return []
-    
+
     print(f"✅ Found {len(chromecasts)} device(s):")
     print()
-    
+
     for i, cast in enumerate(chromecasts, 1):
         print(f"{i}. {cast.name}")
         print(f"   Model: {cast.model_name}")
         print(f"   IP: {cast.cast_info.host}:{cast.cast_info.port}")
         print(f"   UUID: {cast.uuid}")
         print()
-    
+
+    browser.stop_discovery()
     return chromecasts
 
 def test_chromecast_connection(chromecast_name=None):
@@ -86,13 +97,15 @@ def test_chromecast_connection(chromecast_name=None):
     print("Chromecast Connection Test")
     print("=" * 60)
     print()
-    
+
+    browser = None
+
     if not chromecast_name:
         # Discover and let user choose
         chromecasts = discover_chromecasts()
         if not chromecasts:
             return False
-        
+
         if len(chromecasts) == 1:
             cast = chromecasts[0]
         else:
@@ -108,22 +121,24 @@ def test_chromecast_connection(chromecast_name=None):
         chromecasts, browser = pychromecast.get_listed_chromecasts(
             friendly_names=[chromecast_name]
         )
-        
+
         if not chromecasts:
             print(f"❌ Device '{chromecast_name}' not found")
             print()
             print("Available devices:")
             discover_chromecasts()
+            if browser:
+                browser.stop_discovery()
             return False
-        
+
         cast = chromecasts[0]
-    
+
     print()
     print(f"Connecting to: {cast.name}")
-    cast.wait()
+    cast.wait(timeout=10)
     print(f"✅ Connected successfully!")
     print()
-    
+
     # Get device info
     print("Device Information:")
     print(f"  Name: {cast.name}")
@@ -132,7 +147,10 @@ def test_chromecast_connection(chromecast_name=None):
     print(f"  IP: {cast.cast_info.host}")
     print(f"  Status: {cast.status}")
     print()
-    
+
+    if browser:
+        browser.stop_discovery()
+
     return cast
 
 def test_audio_playback(cast, audio_file=None):
