@@ -127,15 +127,19 @@ class TidalPlayer:
                 logger.info(f"Searching Tidal for {search_type}: '{query}' (attempt {attempt}/{max_attempts})")
                 search_result = self.session.search(query, limit=limit)
 
-                if search_type == 'track' and search_result.tracks:
-                    logger.debug(f"Found {len(search_result.tracks)} tracks")
-                    return search_result.tracks
-                elif search_type == 'artist' and search_result.artists:
-                    logger.debug(f"Found {len(search_result.artists)} artists")
-                    return search_result.artists
-                elif search_type == 'album' and search_result.albums:
-                    logger.debug(f"Found {len(search_result.albums)} albums")
-                    return search_result.albums
+                # tidalapi 0.8+ returns a dict with 'tracks', 'artists', 'albums' keys
+                if search_type == 'track' and search_result.get('tracks'):
+                    tracks = search_result['tracks']
+                    logger.debug(f"Found {len(tracks)} tracks")
+                    return tracks
+                elif search_type == 'artist' and search_result.get('artists'):
+                    artists = search_result['artists']
+                    logger.debug(f"Found {len(artists)} artists")
+                    return artists
+                elif search_type == 'album' and search_result.get('albums'):
+                    albums = search_result['albums']
+                    logger.debug(f"Found {len(albums)} albums")
+                    return albums
 
                 logger.warning(f"No {search_type} results found for: '{query}'")
                 return None

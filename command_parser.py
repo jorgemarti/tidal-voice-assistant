@@ -9,6 +9,12 @@ class MusicCommandParser:
     Parse Spanish voice commands into structured music actions.
     
     Supported patterns:
+    Playback controls:
+    - "para" / "stop" → stop playback
+    - "pausa" → pause playback
+    - "continúa" / "sigue" → resume playback
+
+    Music commands:
     - "reproduce [canción]" → play song
     - "pon [canción]" → play song
     - "reproduce música de [artista]" → play artist
@@ -20,6 +26,17 @@ class MusicCommandParser:
         # Patterns for different command types
         # These are ordered by specificity (most specific first)
         self.patterns = {
+            # Playback controls (check first - no query needed)
+            'stop': [
+                r'^(para|detén|detente|stop|parar)$',
+            ],
+            'pause': [
+                r'^(pausa|pausar)$',
+            ],
+            'resume': [
+                r'^(continúa|continua|sigue|reanudar|play)$',
+            ],
+            # Music search commands
             'play_album': [
                 r'reproduce (?:el )?álbum (?:de )?(.+)',
                 r'pon (?:el )?álbum (?:de )?(.+)',
@@ -65,18 +82,27 @@ class MusicCommandParser:
             for pattern in patterns:
                 match = re.search(pattern, text, re.IGNORECASE)
                 if match:
+                    # Control commands don't have a query (group 1)
+                    if action in ['stop', 'pause', 'resume']:
+                        return {
+                            'action': action,
+                            'query': None,
+                            'original_text': text
+                        }
+
+                    # Music commands have a query
                     query = match.group(1).strip()
-                    
+
                     # Clean up common artifacts
                     query = self._clean_query(query)
-                    
+
                     if query:  # Only return if we extracted something
                         return {
                             'action': action,
                             'query': query,
                             'original_text': text
                         }
-        
+
         return None
     
     def _clean_query(self, query):

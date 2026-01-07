@@ -67,10 +67,5 @@ SAMPLE_RATE = 16000
 CHANNELS = 1
 CHUNK_SIZE = 8000
 
-# Tidal Credentials (from environment)
-TIDAL_USERNAME = os.getenv('TIDAL_USERNAME')
-TIDAL_PASSWORD = os.getenv('TIDAL_PASSWORD')
-
-# Validate required environment variables
-if not TIDAL_USERNAME or not TIDAL_PASSWORD:
-    print("⚠️  Warning: Tidal credentials not set in .env file")
+# Note: Tidal authentication now uses OAuth device flow
+# No credentials needed in .env file

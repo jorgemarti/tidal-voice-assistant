@@ -122,13 +122,13 @@ tidal-voice-assistant/
 ### Components
 
 **tidal_auth.py**
-- Handles Tidal OAuth authentication
+- Handles Tidal authentication using OAuth device flow
 - Functions:
-  - `authenticate_tidal()`: One-time OAuth flow
+  - `authenticate_tidal()`: OAuth device flow with browser authorization
   - `save_session()`: Persist OAuth tokens
-  - `load_tidal_session()`: Load or refresh session
-- Creates `tidal_session.json` file
-- Can be run standalone for initial auth
+  - `load_tidal_session()`: Load or create session
+- Creates `tidal_session.json` file with OAuth tokens
+- Can be run standalone to authenticate with Tidal
 
 **wake_word.py**
 - Wake word detection using Vosk (fully offline)
@@ -248,13 +248,13 @@ tidal-voice-assistant/
 **tidal_session.json**
 - OAuth tokens for Tidal API
 - Created by `tidal_auth.py`
-- Contains: access_token, refresh_token, expiry
+- Contains: token_type, access_token, refresh_token, expiry_time
 - **Important**: Keep private, don't commit
 
 **.env**
 - Environment variables (created from .env.example)
-- Contains Tidal credentials (username/password)
-- **Important**: Keep private, don't commit
+- Contains log level configuration (optional)
+- **Important**: Keep private if you add sensitive data, don't commit
 
 ## Data Flow
 
@@ -342,8 +342,8 @@ journalctl -u tidal-assistant -f
 
 ## Security Considerations
 
-- **Credentials**: Never commit .env or tidal_session.json
-- **OAuth**: Tidal tokens refreshed automatically
+- **OAuth Tokens**: Never commit tidal_session.json (contains OAuth tokens)
+- **Authentication**: OAuth device flow - no passwords stored
 - **Privacy**: All wake word detection is fully offline (no cloud)
 - **Network**: All devices must be on same WiFi
 - **Permissions**: Service runs as user, not root

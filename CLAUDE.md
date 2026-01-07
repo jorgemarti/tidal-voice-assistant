@@ -79,13 +79,17 @@ For a detailed visual representation of the system architecture, see [architectu
   - "reproduce [canción]" → play song
   - "pon música de [artista]" → play artist
   - "reproduce el álbum [nombre]" → play album
+- Playback control commands:
+  - "para" / "stop" → stop playback
+  - "pausa" → pause playback
+  - "continúa" / "sigue" → resume playback
 - Uses regex patterns adapted for Spanish
 
 ### 4. Tidal Integration (`tidal_player.py`)
-- OAuth authentication
+- OAuth device flow authentication
 - Search API integration
 - Stream URL fetching
-- Session management
+- Session management with token refresh
 
 ### 5. Chromecast Handler (`tidal_player.py`)
 - Device discovery on local network
@@ -111,6 +115,13 @@ commands = {
         "reproduce el álbum a night at the opera",
         "pon el disco el madrileño",
         "reproduce el álbum de bad bunny"
+    ],
+    'playback_controls': [
+        "para",           # stop
+        "stop",           # stop
+        "pausa",          # pause
+        "continúa",       # resume
+        "sigue"           # resume
     ]
 }
 ```
@@ -119,9 +130,10 @@ commands = {
 
 ### Environment Variables (`.env`)
 ```bash
-TIDAL_USERNAME=user@example.com
-TIDAL_PASSWORD=password
+LOG_LEVEL=INFO  # Optional: DEBUG, INFO, WARNING, ERROR, CRITICAL
 ```
+
+**Note**: Tidal authentication uses OAuth device flow - no credentials needed in `.env`
 
 ### Config File (`config.py`)
 ```python
@@ -135,6 +147,7 @@ CHROMECAST_NAME = "Altavoz Google"  # User's Nest Mini name
 
 ## Usage Flow
 
+### Music Playback Flow
 1. **User says**: "Hey Tidal, reproduce Bohemian Rhapsody"
 2. **Wake word detected**: Vosk detects "hey tidal" trigger phrase
 3. **Speech captured**: 5 seconds of audio recorded
@@ -144,13 +157,22 @@ CHROMECAST_NAME = "Altavoz Google"  # User's Nest Mini name
 7. **Streamed**: Pychromecast sends audio URL to Nest Mini
 8. **Playback**: Music plays on Nest Mini
 
+### Playback Control Flow
+1. **User says**: "Hey Tidal, pausa"
+2. **Wake word detected**: Vosk detects trigger phrase
+3. **Speech captured**: Audio recorded
+4. **Transcribed**: Text "pausa" recognized
+5. **Parsed**: Command parser identifies 'pause' action
+6. **Executed**: Pause command sent to Chromecast
+7. **Result**: Music playback paused
+
 For non-music commands, user continues using:
 - "Ok Google, ¿qué tiempo hace?"
 - "Ok Google, pon un temporizador"
 
 ## Development Priorities
 
-### Phase 1: Core Functionality (Current)
+### Phase 1: Core Functionality (Completed)
 - [x] Wake word detection (Vosk-based, fully offline)
 - [x] Spanish speech recognition
 - [x] Basic command parsing
@@ -158,13 +180,16 @@ For non-music commands, user continues using:
 - [x] Chromecast streaming
 - [x] Testing utilities
 - [x] Comprehensive wake word testing and troubleshooting
+- [x] Logging system with configurable levels
+- [x] Retry mechanisms with exponential backoff
+- [x] Basic playback control (stop, pause, resume)
 
 ### Phase 2: Enhanced Features
 - [ ] Optimize wake word CPU usage
 - [ ] Improved command parsing (more variations)
 - [ ] Error handling and user feedback
 - [ ] Volume control
-- [ ] Playback control (pause, resume, skip)
+- [ ] Skip track functionality
 
 ### Phase 3: Advanced Features
 - [ ] Playlist support
@@ -204,8 +229,8 @@ For non-music commands, user continues using:
 
 ## Security Considerations
 
-- Tidal credentials stored in `.env` (not committed)
-- OAuth tokens in `tidal_session.json` (gitignored)
+- OAuth tokens stored in `tidal_session.json` (gitignored)
+- No passwords stored - OAuth device flow only
 - All wake word processing is local and offline (no cloud)
 - No encryption on local audio capture (acceptable for home use)
 
@@ -240,7 +265,7 @@ gtts                # Text-to-speech (testing only)
 tidal-voice-assistant/
 ├── main.py                      # Entry point
 ├── config.py                    # Configuration
-├── tidal_auth.py               # Tidal OAuth
+├── tidal_auth.py               # Tidal authentication
 ├── wake_word.py                # Wake word detection
 ├── speech_recognition.py       # Spanish STT
 ├── command_parser.py           # Parse Spanish commands
@@ -298,7 +323,7 @@ tidal-voice-assistant/
 
 - **Tidal API**: https://github.com/tamland/python-tidal
   - Unofficial Python client
-  - OAuth authentication
+  - OAuth device flow authentication
   - Search and streaming
 
 ## Contact & Context
@@ -335,7 +360,7 @@ unzip vosk-model-small-es-0.42.zip
 python test_chromecast.py --discover
 python test_chromecast.py --test
 
-# Authenticate Tidal
+# Authenticate Tidal (OAuth device flow - follow URL in output)
 python tidal_auth.py
 
 # Run application

@@ -26,9 +26,16 @@ def print_instructions():
     print("Instructions:")
     print("  1. Say 'Hey Tidal' or 'Oye Tidal' (wake word)")
     print("  2. Speak your music command in Spanish:")
+    print()
+    print("     Music playback:")
     print("     - 'reproduce bohemian rhapsody'")
     print("     - 'pon música de queen'")
     print("     - 'reproduce el álbum a night at the opera'")
+    print()
+    print("     Playback controls:")
+    print("     - 'para' or 'stop' (stop playback)")
+    print("     - 'pausa' (pause)")
+    print("     - 'continúa' or 'sigue' (resume)")
     print()
     print("For other commands (weather, timers), use:")
     print("  'Ok Google, ¿qué tiempo hace?'")
@@ -90,7 +97,21 @@ def main():
 
                 logger.info(f"Parsed action: {parsed['action']}, query: '{parsed['query']}'")
 
-                # Execute
+                # Handle playback control commands
+                if parsed['action'] == 'stop':
+                    tidal_player.stop()
+                    logger.info("Playback stopped")
+                    continue
+                elif parsed['action'] == 'pause':
+                    tidal_player.pause()
+                    logger.info("Playback paused")
+                    continue
+                elif parsed['action'] == 'resume':
+                    tidal_player.play()
+                    logger.info("Playback resumed")
+                    continue
+
+                # Execute music search and playback
                 search_type = command_parser.get_search_type(parsed['action'])
                 success = tidal_player.search_and_play(parsed['query'], search_type)
 

@@ -72,21 +72,22 @@ mv vosk-model-small-es-0.42 vosk-model-es
 rm vosk-model-small-es-0.42.zip
 ```
 
-### Step 3: Configure Environment Variables
+### Step 3: Configure Environment Variables (Optional)
 
 ```bash
 # Copy example environment file
 cp .env.example .env
 
-# Edit with your credentials
+# Edit to set log level if needed
 nano .env
 ```
 
-Add the following:
+You can set the log level:
 ```bash
-TIDAL_USERNAME=your_tidal_email
-TIDAL_PASSWORD=your_tidal_password
+LOG_LEVEL=INFO  # Default - INFO, DEBUG, WARNING, ERROR, CRITICAL
 ```
+
+**Note**: Tidal credentials are no longer needed in `.env` - authentication uses OAuth.
 
 ### Step 4: Authenticate with Tidal
 
@@ -94,7 +95,12 @@ TIDAL_PASSWORD=your_tidal_password
 python tidal_auth.py
 ```
 
-Follow the OAuth link in your terminal and authorize the application.
+This will:
+1. Display a URL to visit in your browser
+2. Ask you to authorize the application
+3. Save the session for future use
+
+Follow the link, log in to Tidal, and authorize the app.
 
 ### Step 5: Test Wake Word Detection
 
@@ -239,10 +245,16 @@ Ready! Say 'Hey Tidal' or 'Oye Tidal' followed by your music command
 
 ### Example Commands (in Spanish):
 
-- **"Hey Tidal, reproduce Bohemian Rhapsody"**
-- **"Oye Tidal, pon música de Queen"**
-- **"Hey Tidal, reproduce el álbum A Night at the Opera"**
-- **"Oye Tidal, pon canciones de Metallica"**
+**Music playback:**
+- **"Hey Tidal, reproduce Bohemian Rhapsody"** → Play song
+- **"Oye Tidal, pon música de Queen"** → Play artist's top tracks
+- **"Hey Tidal, reproduce el álbum A Night at the Opera"** → Play album
+- **"Oye Tidal, pon canciones de Metallica"** → Play artist
+
+**Playback controls:**
+- **"Hey Tidal, para"** or **"stop"** → Stop playback
+- **"Oye Tidal, pausa"** → Pause playback
+- **"Hey Tidal, continúa"** or **"sigue"** → Resume playback
 
 ### Non-Music Commands (use Nest Mini directly):
 
@@ -314,9 +326,10 @@ tidal-voice-assistant/
 - Run discovery: `python test_chromecast.py --discover`
 
 ### Tidal Authentication Fails
-- Check credentials in `.env`
-- Re-authenticate: `python tidal_auth.py`
+- Delete `tidal_session.json` and re-run: `python tidal_auth.py`
+- Make sure to follow the OAuth URL in your browser
 - Verify Tidal subscription is active
+- Check internet connection
 
 ### Audio Quality Issues
 - Increase Tidal quality in `config.py`: `'quality': 'LOSSLESS'`

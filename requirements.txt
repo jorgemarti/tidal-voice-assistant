@@ -5,7 +5,7 @@ vosk==0.3.45
 pyaudio==0.2.14
 
 # Tidal API integration
-tidalapi==0.7.6
+tidalapi>=0.8.10
 
 # Chromecast protocol
 pychromecast==14.0.1
