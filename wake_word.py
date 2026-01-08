@@ -104,12 +104,14 @@ class WakeWordDetector:
                     result = json.loads(self.recognizer.Result())
                     text = result.get('text', '').strip()
 
-                    if text and self._contains_wake_phrase(text):
-                        logger.info(f"Wake word detected! (heard: '{text}')")
-                        # Reset recognizer for next detection (with grammar)
-                        grammar = json.dumps(self.wake_phrases + ['[unk]'])
-                        self.recognizer = KaldiRecognizer(self.model, SAMPLE_RATE, grammar)
-                        return True
+                    if text:
+                        logger.debug(f"Heard: '{text}'")
+                        if self._contains_wake_phrase(text):
+                            logger.info(f"Wake word detected! (heard: '{text}')")
+                            # Reset recognizer for next detection (with grammar)
+                            grammar = json.dumps(self.wake_phrases + ['[unk]'])
+                            self.recognizer = KaldiRecognizer(self.model, SAMPLE_RATE, grammar)
+                            return True
 
         except KeyboardInterrupt:
             logger.warning("Wake word detection interrupted")

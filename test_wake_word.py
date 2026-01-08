@@ -25,9 +25,9 @@ def test_basic_wake_word():
     print("Press Ctrl+C to stop")
     print()
 
+    count = 0
     try:
         with WakeWordDetector() as detector:
-            count = 0
             while True:
                 detected = detector.listen()
                 if detected:
@@ -35,12 +35,16 @@ def test_basic_wake_word():
                     print(f"✅ Wake word #{count} detected successfully!")
                     print("Waiting for next wake word...")
                     print()
+                elif detected is False:
+                    # Ctrl+C was pressed inside listen()
+                    break
     except KeyboardInterrupt:
-        print(f"\n\nTest completed. Total wake words detected: {count}")
+        pass
     except Exception as e:
         print(f"\n❌ Error: {e}")
         return False
 
+    print(f"\n\nTest completed. Total wake words detected: {count}")
     return True
 
 def test_continuous_transcription():

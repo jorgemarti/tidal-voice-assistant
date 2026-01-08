@@ -64,6 +64,7 @@ WAKE_WORDS = [
     'okay música',    # User tested - works reliably
     'okey música',
     'oke música',
+    'okey musical',
 ]
 
 # Speech Recognition Configuration
