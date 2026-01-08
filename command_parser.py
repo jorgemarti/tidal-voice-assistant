@@ -38,6 +38,7 @@ class MusicCommandParser:
             ],
             'skip': [
                 r'^(siguiente|salta|saltar|skip|próxima|proxima)$',
+                r'pasa (?:la )?canción',
             ],
             # Music search commands
             'play_playlist': [
