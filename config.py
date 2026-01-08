@@ -61,9 +61,8 @@ CHROMECAST_NAME = "Altavoz Google"  # Your Nest Mini name
 
 # Wake Word Configuration
 WAKE_WORDS = [
-    'okay música',    # User tested - works reliably
-    'okey música',
-    'oke música',
+    'okay musica',    # No accent - Vosk uses unaccented
+    'okey musica',
     'okey musical',
 ]
 
