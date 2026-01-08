@@ -43,7 +43,12 @@ class WakeWordDetector:
 
         logger.info(f"Loading Vosk model for wake word detection from: {model_path}")
         self.model = Model(str(model_dir))
-        self.recognizer = KaldiRecognizer(self.model, SAMPLE_RATE)
+
+        # Use grammar to restrict recognition to wake phrases only
+        # This dramatically improves accuracy for specific phrases
+        grammar = json.dumps(self.wake_phrases + ['[unk]'])
+        self.recognizer = KaldiRecognizer(self.model, SAMPLE_RATE, grammar)
+        logger.info(f"Using restricted grammar for wake word detection")
 
         self.audio = pyaudio.PyAudio()
         self.audio_stream = self.audio.open(
@@ -101,8 +106,9 @@ class WakeWordDetector:
 
                     if text and self._contains_wake_phrase(text):
                         logger.info(f"Wake word detected! (heard: '{text}')")
-                        # Reset recognizer for next detection
-                        self.recognizer = KaldiRecognizer(self.model, SAMPLE_RATE)
+                        # Reset recognizer for next detection (with grammar)
+                        grammar = json.dumps(self.wake_phrases + ['[unk]'])
+                        self.recognizer = KaldiRecognizer(self.model, SAMPLE_RATE, grammar)
                         return True
 
         except KeyboardInterrupt:

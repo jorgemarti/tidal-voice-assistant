@@ -61,10 +61,13 @@ CHROMECAST_NAME = "Altavoz Google"  # Your Nest Mini name
 
 # Wake Word Configuration
 WAKE_WORDS = [
-    'hey tidal', 'oye tidal',
-    'estival', 'el estival',  # Spanish transcription of "hey tidal"
-    'ideal', 'ei tidal',
-    'ey tidal', 'éy tidal',
+    # English-style
+    'hey tidal', 'hey taidal',
+    # Spanish-style
+    'oye tidal', 'oye taidal',
+    'ei tidal', 'ey tidal',
+    # Phonetic approximations the model might recognize
+    'je tidal', 'jei tidal',
 ]
 
 # Speech Recognition Configuration
