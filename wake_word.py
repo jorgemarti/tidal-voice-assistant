@@ -6,7 +6,7 @@ import pyaudio
 from vosk import Model, KaldiRecognizer
 import json
 from pathlib import Path
-from config import VOSK_MODEL_PATH, SAMPLE_RATE, CHUNK_SIZE, setup_logging
+from config import VOSK_MODEL_PATH, SAMPLE_RATE, CHUNK_SIZE, WAKE_WORDS, setup_logging
 
 logger = setup_logging(__name__)
 
@@ -38,7 +38,7 @@ class WakeWordDetector:
             )
 
         # Wake phrases to detect (normalized to lowercase)
-        self.wake_phrases = wake_phrases or ['hey tidal', 'oye tidal']
+        self.wake_phrases = wake_phrases or WAKE_WORDS
         self.wake_phrases = [phrase.lower().strip() for phrase in self.wake_phrases]
 
         logger.info(f"Loading Vosk model for wake word detection from: {model_path}")
