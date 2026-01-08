@@ -1,0 +1,5 @@
+venv/
+.git/
+.claude/
+__pycache__/
+vosk-model-es/
