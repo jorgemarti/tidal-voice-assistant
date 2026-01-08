@@ -25,11 +25,7 @@ This project creates a voice-controlled Tidal music player using a Raspberry Pi 
 
 - **Raspberry Pi 5** (4GB+ recommended)
 - **MicroSD Card** (32GB+, Class 10)
-- **Microphone** (one of the following):
-  - USB Microphone ($15-50)
-  - ReSpeaker 2-Mics HAT (~$20)
-  - USB Webcam with microphone
-  - PlayStation Eye Camera (budget option)
+- **Microphone** (USB Microphone ($15-50))
 - **Google Nest Mini** (2nd generation or later)
 - Both devices on the same WiFi network
 
