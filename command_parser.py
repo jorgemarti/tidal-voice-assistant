@@ -36,7 +36,14 @@ class MusicCommandParser:
             'resume': [
                 r'^(continúa|continua|sigue|reanudar|play)$',
             ],
+            'skip': [
+                r'^(siguiente|salta|saltar|skip|próxima|proxima)$',
+            ],
             # Music search commands
+            'play_playlist': [
+                r'reproduce (?:la )?(?:playlist|lista) (.+)',
+                r'pon (?:la )?(?:playlist|lista) (.+)',
+            ],
             'play_album': [
                 r'reproduce (?:el )?álbum (?:de )?(.+)',
                 r'pon (?:el )?álbum (?:de )?(.+)',
@@ -83,7 +90,7 @@ class MusicCommandParser:
                 match = re.search(pattern, text, re.IGNORECASE)
                 if match:
                     # Control commands don't have a query (group 1)
-                    if action in ['stop', 'pause', 'resume']:
+                    if action in ['stop', 'pause', 'resume', 'skip']:
                         return {
                             'action': action,
                             'query': None,
@@ -125,7 +132,8 @@ class MusicCommandParser:
         mapping = {
             'play_song': 'track',
             'play_artist': 'artist',
-            'play_album': 'album'
+            'play_album': 'album',
+            'play_playlist': 'playlist'
         }
         return mapping.get(action, 'track')
 

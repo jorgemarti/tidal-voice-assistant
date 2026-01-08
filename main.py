@@ -31,11 +31,13 @@ def print_instructions():
     print("     - 'reproduce bohemian rhapsody'")
     print("     - 'pon música de queen'")
     print("     - 'reproduce el álbum a night at the opera'")
+    print("     - 'reproduce la playlist rock clásico'")
     print()
     print("     Playback controls:")
     print("     - 'para' or 'stop' (stop playback)")
     print("     - 'pausa' (pause)")
     print("     - 'continúa' or 'sigue' (resume)")
+    print("     - 'siguiente' or 'salta' (skip track)")
     print()
     print("For other commands (weather, timers), use:")
     print("  'Ok Google, ¿qué tiempo hace?'")
@@ -109,6 +111,10 @@ def main():
                 elif parsed['action'] == 'resume':
                     tidal_player.play()
                     logger.info("Playback resumed")
+                    continue
+                elif parsed['action'] == 'skip':
+                    tidal_player.skip()
+                    logger.info("Skipped to next track")
                     continue
 
                 # Execute music search and playback

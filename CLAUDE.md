@@ -79,6 +79,9 @@ For a detailed visual representation of the system architecture, see [architectu
   - "para" / "stop" → stop playback
   - "pausa" → pause playback
   - "continúa" / "sigue" → resume playback
+  - "siguiente" / "salta" → skip track
+- Playlist commands:
+  - "reproduce la playlist [nombre]" → play playlist
 - Uses regex patterns adapted for Spanish
 
 ### 4. Tidal Integration (`tidal_player.py`)
@@ -119,7 +122,13 @@ commands = {
         "stop",           # stop
         "pausa",          # pause
         "continúa",       # resume
-        "sigue"           # resume
+        "sigue",          # resume
+        "siguiente",      # skip
+        "salta"           # skip
+    ],
+    'play_playlist': [
+        "reproduce la playlist rock clásico",
+        "pon la lista mis favoritos"
     ]
 }
 ```
@@ -164,6 +173,7 @@ CHROMECAST_NAME = "Altavoz Google"  # User's Nest Mini name
 - **Single song**: Plays the requested track, then queues 10 similar tracks from Tidal's track radio
 - **Artist**: Queues up to 20 top tracks from the artist
 - **Album**: Queues all tracks from the album in order
+- **Playlist**: Queues all tracks from the playlist
 
 Autoplay can be disabled by setting `AUTOPLAY_ENABLED = False` in `config.py`.
 
@@ -201,10 +211,10 @@ For non-music commands, user continues using:
 - [ ] Improved command parsing (more variations)
 - [ ] Error handling and user feedback
 - [ ] Volume control
-- [ ] Skip track functionality
+- [x] **Skip track functionality** ("siguiente", "salta")
+- [x] **Playlist support** ("reproduce la playlist X")
 
 ### Phase 3: Advanced Features
-- [ ] Playlist support
 - [ ] Multi-room audio
 - [ ] Web interface
 - [ ] Home Assistant integration

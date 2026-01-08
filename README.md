@@ -246,11 +246,13 @@ Ready! Say 'Hey Tidal' or 'Oye Tidal' followed by your music command
 - **"Oye Tidal, pon música de Queen"** → Play artist's top tracks
 - **"Hey Tidal, reproduce el álbum A Night at the Opera"** → Play album
 - **"Oye Tidal, pon canciones de Metallica"** → Play artist
+- **"Hey Tidal, reproduce la playlist rock clásico"** → Play playlist
 
 **Playback controls:**
 - **"Hey Tidal, para"** or **"stop"** → Stop playback
 - **"Oye Tidal, pausa"** → Pause playback
 - **"Hey Tidal, continúa"** or **"sigue"** → Resume playback
+- **"Oye Tidal, siguiente"** or **"salta"** → Skip to next track
 
 ### Non-Music Commands (use Nest Mini directly):
 
@@ -390,7 +392,8 @@ LOG_LEVEL=WARNING   # Only warnings and errors
 - [x] Fully offline wake word detection (no external APIs)
 - [x] Autoplay/continuous playback (queues similar tracks)
 - [x] Full album and artist playback (queues all tracks)
-- [ ] Playlist support
+- [x] Playlist support
+- [x] Skip track functionality
 - [ ] Volume control via voice
 - [ ] Multi-language support (Catalan, etc.)
 - [ ] Web interface for configuration

@@ -141,6 +141,10 @@ class TidalPlayer:
                     albums = search_result['albums']
                     logger.debug(f"Found {len(albums)} albums")
                     return albums
+                elif search_type == 'playlist' and search_result.get('playlists'):
+                    playlists = search_result['playlists']
+                    logger.debug(f"Found {len(playlists)} playlists")
+                    return playlists
 
                 logger.warning(f"No {search_type} results found for: '{query}'")
                 return None
@@ -283,6 +287,40 @@ class TidalPlayer:
             logger.error(f"Error playing album: {e}")
             return False
 
+    def play_playlist(self, playlist):
+        """
+        Play a playlist with all its tracks.
+
+        Args:
+            playlist: Tidal playlist object
+
+        Returns:
+            True if successful, False otherwise
+        """
+        try:
+            logger.info(f"Playing playlist: {playlist.name}")
+            logger.debug(f"Playlist has {playlist.num_tracks} tracks")
+
+            tracks = playlist.tracks()
+            if not tracks:
+                logger.warning("No tracks found in playlist")
+                return False
+
+            logger.info(f"Queueing {len(tracks)} tracks from playlist: {playlist.name}")
+
+            # Play first track, queue the rest
+            for i, track in enumerate(tracks):
+                success = self.play_track(track, enqueue=(i > 0))
+                if not success and i == 0:
+                    return False
+
+            logger.info(f"Queued {len(tracks)} tracks for continuous playback")
+            return True
+
+        except Exception as e:
+            logger.error(f"Error playing playlist: {e}")
+            return False
+
     def play_track_with_autoplay(self, track, autoplay=None):
         """
         Play a single track and queue similar tracks for continuous playback.
@@ -358,6 +396,8 @@ class TidalPlayer:
             return self.play_artist_top_tracks(results[0])
         elif search_type == 'album':
             return self.play_album(results[0])
+        elif search_type == 'playlist':
+            return self.play_playlist(results[0])
 
         return False
 
@@ -402,6 +442,12 @@ class TidalPlayer:
         if self.media_controller:
             self.media_controller.play()
             logger.info("Playback resumed")
+
+    def skip(self):
+        """Skip to next track in queue"""
+        if self.media_controller:
+            self.media_controller.queue_next()
+            logger.info("Skipped to next track")
 
 if __name__ == "__main__":
     """Test Tidal player"""
