@@ -60,7 +60,12 @@ AUTOPLAY_TRACK_COUNT = 10  # Number of similar tracks to queue for autoplay
 CHROMECAST_NAME = "Altavoz Google"  # Your Nest Mini name
 
 # Wake Word Configuration
-WAKE_WORDS = ['hey tidal', 'oye tidal']  # Phrases to trigger voice assistant
+WAKE_WORDS = [
+    'hey tidal', 'oye tidal',
+    'estival', 'el estival',  # Spanish transcription of "hey tidal"
+    'ideal', 'ei tidal',
+    'ey tidal', 'éy tidal',
+]
 
 # Speech Recognition Configuration
 VOSK_MODEL_PATH = "vosk-model-es"  # Spanish model directory
