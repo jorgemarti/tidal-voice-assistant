@@ -51,6 +51,10 @@ TIDAL_CONFIG = {
     'session_file': 'tidal_session.json'
 }
 
+# Autoplay Configuration
+AUTOPLAY_ENABLED = True  # Enable continuous playback after a song ends
+AUTOPLAY_TRACK_COUNT = 10  # Number of similar tracks to queue for autoplay
+
 # Chromecast Configuration
 # Replace with your Nest Mini's exact name from Google Home app
 CHROMECAST_NAME = "Altavoz Google"  # Your Nest Mini name

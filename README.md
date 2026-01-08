@@ -278,6 +278,19 @@ sudo systemctl status tidal-assistant
 journalctl -u tidal-assistant -f
 ```
 
+### Token Renewal
+
+Tidal tokens auto-refresh, but the refresh token expires (~30 days). When this happens:
+
+1. **Voice notification**: The Nest Mini will announce in Spanish: *"Atención. La sesión de Tidal ha caducado. Por favor, ejecuta la autenticación manualmente."*
+2. **Manual re-auth required**:
+   ```bash
+   cd ~/tidal-voice-assistant
+   source venv/bin/activate
+   python tidal_auth.py
+   sudo systemctl restart tidal-assistant
+   ```
+
 ## 📝 Project Structure
 
 ```
@@ -370,13 +383,14 @@ LOG_LEVEL=WARNING   # Only warnings and errors
 - Spanish speech recognition works best with clear pronunciation (Spain Spanish)
 - Network latency affects response time
 - Tidal API rate limits may apply
-- Single track playback (no playlists yet)
+- Tidal refresh tokens expire (~30 days) - voice notification will alert you
 
 ## 🛣️ Future Enhancements
 
 - [x] Fully offline wake word detection (no external APIs)
+- [x] Autoplay/continuous playback (queues similar tracks)
+- [x] Full album and artist playback (queues all tracks)
 - [ ] Playlist support
-- [ ] Queue management
 - [ ] Volume control via voice
 - [ ] Multi-language support (Catalan, etc.)
 - [ ] Web interface for configuration

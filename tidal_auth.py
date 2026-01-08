@@ -4,10 +4,37 @@ Tidal authentication module
 
 import tidalapi
 import json
-from config import TIDAL_CONFIG, setup_logging
+import pychromecast
+import urllib.parse
+from config import TIDAL_CONFIG, CHROMECAST_NAME, setup_logging
 from pathlib import Path
 
 logger = setup_logging(__name__)
+
+
+def announce_auth_needed():
+    """Announce on Chromecast that re-authentication is needed."""
+    message = "Atención. La sesión de Tidal ha caducado. Por favor, ejecuta la autenticación manualmente."
+
+    try:
+        chromecasts, browser = pychromecast.get_listed_chromecasts(
+            friendly_names=[CHROMECAST_NAME]
+        )
+        if not chromecasts:
+            logger.warning(f"Chromecast '{CHROMECAST_NAME}' not found for announcement")
+            return
+
+        cast = chromecasts[0]
+        cast.wait(timeout=10)
+
+        tts_url = f"https://translate.google.com/translate_tts?ie=UTF-8&client=tw-ob&tl=es&q={urllib.parse.quote(message)}"
+        cast.media_controller.play_media(tts_url, 'audio/mp3')
+        cast.media_controller.block_until_active()
+
+        logger.info("Announced auth needed on Chromecast")
+        browser.stop_discovery()
+    except Exception as e:
+        logger.error(f"Failed to announce: {e}")
 
 def authenticate_tidal():
     """
@@ -73,18 +100,25 @@ def load_tidal_session():
                 data['expiry_time']
             )
 
-            # Verify session is still valid
+            # Verify session is still valid (this also refreshes tokens if needed)
             if session.check_login():
                 logger.info("Loaded existing Tidal session")
+                # Save refreshed tokens
+                save_session(session)
                 return session
             else:
-                logger.warning("Session expired, re-authenticating...")
+                logger.warning("Session expired, re-authentication needed")
+                announce_auth_needed()
+                return None
         except Exception as e:
             logger.warning(f"Could not load existing session: {e}")
+            announce_auth_needed()
+            return None
 
-    # Create new session
-    logger.info("No valid session found, creating new one...")
-    return authenticate_tidal()
+    # No session file exists - need manual auth
+    logger.error("No session file found. Run 'python tidal_auth.py' to authenticate.")
+    announce_auth_needed()
+    return None
 
 if __name__ == "__main__":
     print("=" * 60)

@@ -8,7 +8,8 @@ import pychromecast
 import time
 from config import (
     CHROMECAST_NAME, TIDAL_CONFIG, setup_logging,
-    RETRY_MAX_ATTEMPTS, RETRY_DELAY_SECONDS, RETRY_BACKOFF_MULTIPLIER
+    RETRY_MAX_ATTEMPTS, RETRY_DELAY_SECONDS, RETRY_BACKOFF_MULTIPLIER,
+    AUTOPLAY_ENABLED, AUTOPLAY_TRACK_COUNT
 )
 
 logger = setup_logging(__name__)
@@ -155,13 +156,14 @@ class TidalPlayer:
 
         return None
     
-    def play_track(self, track, retry=True):
+    def play_track(self, track, retry=True, enqueue=False):
         """
         Play a single track on Chromecast with retry support.
 
         Args:
             track: Tidal track object
             retry: Whether to retry on failure (default: True)
+            enqueue: If True, add to queue instead of playing immediately (default: False)
 
         Returns:
             True if successful, False otherwise
@@ -169,7 +171,8 @@ class TidalPlayer:
         max_attempts = RETRY_MAX_ATTEMPTS if retry else 1
         delay = RETRY_DELAY_SECONDS
 
-        logger.info(f"Playing: {track.name} by {track.artist.name}")
+        action = "Queueing" if enqueue else "Playing"
+        logger.info(f"{action}: {track.name} by {track.artist.name}")
         logger.debug(f"Album: {track.album.name}, Duration: {track.duration // 60}:{track.duration % 60:02d}")
 
         for attempt in range(1, max_attempts + 1):
@@ -186,17 +189,23 @@ class TidalPlayer:
                     stream_url,
                     'audio/mp4',
                     title=track.name,
-                    thumb=track.album.image(1280) if track.album else None
+                    thumb=track.album.image(1280) if track.album else None,
+                    enqueue=enqueue
                 )
-                self.media_controller.block_until_active()
 
-                logger.info("Playback started successfully")
+                # Only block for the first track (not enqueued ones)
+                if not enqueue:
+                    self.media_controller.block_until_active()
+                    logger.info("Playback started successfully")
+                else:
+                    logger.debug(f"Track queued: {track.name}")
+
                 return True
 
             except Exception as e:
-                logger.error(f"Playback error: {e}")
+                logger.error(f"{'Queue' if enqueue else 'Playback'} error: {e}")
                 if attempt < max_attempts:
-                    logger.info(f"Retrying playback in {delay} seconds...")
+                    logger.info(f"Retrying in {delay} seconds...")
                     time.sleep(delay)
                     delay *= RETRY_BACKOFF_MULTIPLIER
                 else:
@@ -206,7 +215,7 @@ class TidalPlayer:
     
     def play_artist_top_tracks(self, artist, limit=20):
         """
-        Play top tracks from an artist.
+        Play top tracks from an artist with continuous playback.
 
         Args:
             artist: Tidal artist object
@@ -223,8 +232,17 @@ class TidalPlayer:
                 logger.warning("No tracks found for artist")
                 return False
 
-            # Play first track
-            return self.play_track(top_tracks[0])
+            logger.info(f"Queueing {len(top_tracks)} tracks from {artist.name}")
+
+            # Play first track, queue the rest
+            for i, track in enumerate(top_tracks):
+                success = self.play_track(track, enqueue=(i > 0))
+                if not success and i == 0:
+                    # If first track fails, abort
+                    return False
+
+            logger.info(f"Queued {len(top_tracks)} tracks for continuous playback")
+            return True
 
         except Exception as e:
             logger.error(f"Error playing artist: {e}")
@@ -232,7 +250,7 @@ class TidalPlayer:
 
     def play_album(self, album):
         """
-        Play an album.
+        Play an album with continuous playback.
 
         Args:
             album: Tidal album object
@@ -249,11 +267,66 @@ class TidalPlayer:
                 logger.warning("No tracks found in album")
                 return False
 
-            # Play first track
-            return self.play_track(tracks[0])
+            logger.info(f"Queueing {len(tracks)} tracks from album: {album.name}")
+
+            # Play first track, queue the rest
+            for i, track in enumerate(tracks):
+                success = self.play_track(track, enqueue=(i > 0))
+                if not success and i == 0:
+                    # If first track fails, abort
+                    return False
+
+            logger.info(f"Queued {len(tracks)} tracks for continuous playback")
+            return True
 
         except Exception as e:
             logger.error(f"Error playing album: {e}")
+            return False
+
+    def play_track_with_autoplay(self, track, autoplay=None):
+        """
+        Play a single track and queue similar tracks for continuous playback.
+
+        Uses Tidal's track radio feature to find similar songs.
+
+        Args:
+            track: Tidal track object
+            autoplay: Override autoplay setting (default: use config)
+
+        Returns:
+            True if successful, False otherwise
+        """
+        # Use config setting if not explicitly specified
+        if autoplay is None:
+            autoplay = AUTOPLAY_ENABLED
+
+        try:
+            # Play the requested track first
+            if not self.play_track(track):
+                return False
+
+            # Queue similar tracks if autoplay is enabled
+            if autoplay:
+                logger.info(f"Getting similar tracks for autoplay...")
+                try:
+                    radio_tracks = track.get_track_radio(limit=AUTOPLAY_TRACK_COUNT)
+
+                    if radio_tracks:
+                        logger.info(f"Queueing {len(radio_tracks)} similar tracks")
+                        for radio_track in radio_tracks:
+                            self.play_track(radio_track, enqueue=True)
+                        logger.info(f"Autoplay enabled with {len(radio_tracks)} tracks queued")
+                    else:
+                        logger.warning("No similar tracks found for autoplay")
+
+                except Exception as e:
+                    logger.warning(f"Could not get radio tracks: {e}")
+                    # Continue anyway - at least the main track is playing
+
+            return True
+
+        except Exception as e:
+            logger.error(f"Error playing track with autoplay: {e}")
             return False
 
     def search_and_play(self, query, search_type='track'):
@@ -280,7 +353,7 @@ class TidalPlayer:
 
         # Play based on search type
         if search_type == 'track':
-            return self.play_track(results[0])
+            return self.play_track_with_autoplay(results[0])
         elif search_type == 'artist':
             return self.play_artist_top_tracks(results[0])
         elif search_type == 'album':
@@ -288,11 +361,35 @@ class TidalPlayer:
 
         return False
 
+    def speak(self, message, lang='es'):
+        """
+        Speak a message on the Chromecast using Google TTS.
+
+        Args:
+            message: Text to speak
+            lang: Language code (default: 'es' for Spanish)
+        """
+        if not self.cast_device and not self.find_chromecast():
+            logger.error("Cannot speak: Chromecast not found")
+            return False
+
+        try:
+            import urllib.parse
+            tts_url = f"https://translate.google.com/translate_tts?ie=UTF-8&client=tw-ob&tl={lang}&q={urllib.parse.quote(message)}"
+
+            self.media_controller.play_media(tts_url, 'audio/mp3')
+            self.media_controller.block_until_active()
+            logger.info(f"Speaking: {message}")
+            return True
+        except Exception as e:
+            logger.error(f"TTS error: {e}")
+            return False
+
     def stop(self):
-        """Stop playback"""
+        """Stop playback and clear queue"""
         if self.media_controller:
             self.media_controller.stop()
-            logger.info("Playback stopped")
+            logger.info("Playback stopped and queue cleared")
 
     def pause(self):
         """Pause playback"""

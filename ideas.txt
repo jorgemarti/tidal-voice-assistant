@@ -1,0 +1,2 @@
+- Un comando per a reproduïr el welo del mondúver
+- Un comando "Oye, Claudio" para hacer preguntas a la IA (haiku).

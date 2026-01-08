@@ -4,6 +4,13 @@
 
 This is a **Tidal Voice Assistant** for Raspberry Pi 5 that enables voice-controlled music playback from Tidal on a Google Nest Mini (2nd generation). The project was created because Google Nest Mini doesn't support Tidal integration reliably.
 
+## Project Conventions
+
+### Response Style
+- Be concise, minimize explanatory text. I am reaching easily Claude's rate-limits per sessions.
+- Show code changes, not lengthy explanations
+- Skip "here's what I did" preambles
+
 ## Problem Statement
 
 Jorge has a Google Nest Mini (2nd gen) that he uses for:
@@ -18,17 +25,6 @@ Jorge has a Google Nest Mini (2nd gen) that he uses for:
 2. Searches and fetches music from Tidal
 3. Casts audio to Nest Mini via Chromecast protocol
 4. Keeps native "Ok Google" functionality for non-music tasks
-
-## User Context
-
-- **User**: Jorge
-- **Location**: Menorca, Spain
-- **Language**: Spanish (Spain variant)
-- **Technical Background**: Cloud Security Engineer at UN with extensive experience in:
-  - AWS, Azure, Kubernetes
-  - OpenStack (UNIQCLOUD)
-  - Infrastructure automation
-  - Security tooling
 
 ## Technical Requirements
 
@@ -89,7 +85,9 @@ For a detailed visual representation of the system architecture, see [architectu
 - OAuth device flow authentication
 - Search API integration
 - Stream URL fetching
-- Session management with token refresh
+- Session management with token refresh (auto-saves refreshed tokens)
+- **Autoplay/Continuous playback**: Automatically queues similar tracks using Tidal's track radio feature
+- **Token expiry notification**: When refresh token expires (~30 days), announces on Nest Mini in Spanish that manual re-auth is needed
 
 ### 5. Chromecast Handler (`tidal_player.py`)
 - Device discovery on local network
@@ -142,6 +140,10 @@ TIDAL_CONFIG = {
     'session_file': 'tidal_session.json'
 }
 
+# Autoplay Configuration
+AUTOPLAY_ENABLED = True   # Enable continuous playback after a song ends
+AUTOPLAY_TRACK_COUNT = 10 # Number of similar tracks to queue for autoplay
+
 CHROMECAST_NAME = "Altavoz Google"  # User's Nest Mini name
 ```
 
@@ -156,6 +158,14 @@ CHROMECAST_NAME = "Altavoz Google"  # User's Nest Mini name
 6. **Searched**: Tidal API finds matching track
 7. **Streamed**: Pychromecast sends audio URL to Nest Mini
 8. **Playback**: Music plays on Nest Mini
+9. **Autoplay**: Similar tracks are automatically queued for continuous playback
+
+**Autoplay Behavior:**
+- **Single song**: Plays the requested track, then queues 10 similar tracks from Tidal's track radio
+- **Artist**: Queues up to 20 top tracks from the artist
+- **Album**: Queues all tracks from the album in order
+
+Autoplay can be disabled by setting `AUTOPLAY_ENABLED = False` in `config.py`.
 
 ### Playback Control Flow
 1. **User says**: "Hey Tidal, pausa"
@@ -183,6 +193,8 @@ For non-music commands, user continues using:
 - [x] Logging system with configurable levels
 - [x] Retry mechanisms with exponential backoff
 - [x] Basic playback control (stop, pause, resume)
+- [x] **Autoplay/Continuous playback** (queues similar tracks automatically)
+- [x] **Full album and artist playback** (queues all tracks, not just first)
 
 ### Phase 2: Enhanced Features
 - [ ] Optimize wake word CPU usage
@@ -193,7 +205,6 @@ For non-music commands, user continues using:
 
 ### Phase 3: Advanced Features
 - [ ] Playlist support
-- [ ] Queue management
 - [ ] Multi-room audio
 - [ ] Web interface
 - [ ] Home Assistant integration
@@ -221,7 +232,6 @@ For non-music commands, user continues using:
 
 1. **Wake Word CPU Usage**: Vosk-based wake word uses ~15-25% CPU (continuous transcription) - acceptable for dedicated Pi 5
 2. **Wake Word Latency**: 200-500ms detection time (vs <50ms with cloud solutions like Picovoice)
-3. **Single Track**: Currently plays one track at a time (no queue)
 3. **Network Dependency**: Requires stable WiFi for both Pi and Nest Mini
 4. **Speech Recognition**: Works best in quiet environments
 5. **Tidal API**: Rate limits may apply for heavy usage
@@ -300,7 +310,7 @@ tidal-voice-assistant/
 
 ### Advanced Music Features
 - Create/manage playlists via voice
-- Radio mode (continuous playback)
+- ~~Radio mode (continuous playback)~~ ✅ Implemented via autoplay
 - Music recommendations
 - Lyrics display (if screen available)
 
