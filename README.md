@@ -61,13 +61,11 @@ pip install -r requirements.txt
 ### Step 2: Download Spanish Speech Recognition Model
 
 ```bash
-# Download large Vosk Spanish model (1.4GB, better accuracy)
-wget https://alphacephei.com/vosk/models/vosk-model-es-0.42.zip
-unzip vosk-model-es-0.42.zip
-rm vosk-model-es-0.42.zip
+# Download Vosk Spanish model
+wget https://alphacephei.com/vosk/models/vosk-model-small-es-0.42.zip
+unzip vosk-model-small-es-0.42.zip
+rm vosk-model-small-es-0.42.zip
 ```
-
-**Note**: The large model provides significantly better recognition accuracy than the small model.
 
 ### Step 3: Configure Environment Variables (Optional)
 
@@ -317,7 +315,7 @@ tidal-voice-assistant/
 ├── test_tidal.py               # Tidal integration testing
 ├── test_wake_word.py           # Wake word detection testing
 ├── tidal-assistant.service     # Systemd service file
-└── vosk-model-es-0.42/         # Large Spanish speech recognition model (downloaded)
+└── vosk-model-small-es-0.42/   # Spanish speech recognition model (downloaded)
 ```
 
 ## 🐛 Troubleshooting
@@ -332,7 +330,7 @@ tidal-voice-assistant/
 - Pause briefly after the wake word if saying command separately
 
 ### Speech Recognition Not Working
-- Verify Spanish model is downloaded to `vosk-model-es-0.42/`
+- Verify Spanish model is downloaded to `vosk-model-small-es-0.42/`
 - Test with: `python main.py` and check partial transcriptions in logs
 - Test wake word detection: `python test_wake_word.py --debug`
 

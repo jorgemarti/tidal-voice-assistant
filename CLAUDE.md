@@ -301,7 +301,7 @@ tidal-voice-assistant/
 ├── requirements.txt            # Python deps
 ├── .env.example                # Environment template
 ├── tidal-assistant.service     # Systemd service
-└── vosk-model-es-0.42/         # Large Spanish model (1.4GB, downloaded)
+└── vosk-model-small-es-0.42/   # Spanish model (244MB, downloaded)
 ```
 
 ## User Experience Goals
@@ -338,7 +338,7 @@ tidal-voice-assistant/
 ## Resources & References
 
 - **Vosk Models**: https://alphacephei.com/vosk/models
-  - Using: `vosk-model-es-0.42` (1.4GB, better accuracy)
+  - Using: `vosk-model-small-es-0.42` (244MB, low memory usage)
   - Used for both wake word detection and command recognition
 
 - **Pychromecast**: https://github.com/home-assistant-libs/pychromecast
@@ -376,9 +376,9 @@ python3 -m venv venv
 source venv/bin/activate
 pip install -r requirements.txt
 
-# Download large Spanish model (1.4GB)
-wget https://alphacephei.com/vosk/models/vosk-model-es-0.42.zip
-unzip vosk-model-es-0.42.zip
+# Download Spanish model (244MB)
+wget https://alphacephei.com/vosk/models/vosk-model-small-es-0.42.zip
+unzip vosk-model-small-es-0.42.zip
 
 # Test Chromecast
 python test_chromecast.py --discover
