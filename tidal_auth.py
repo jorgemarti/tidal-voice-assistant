@@ -32,7 +32,7 @@ def announce_auth_needed():
         cast.media_controller.play_media(tts_url, 'audio/mp3')
         cast.media_controller.block_until_active()
 
-        logger.info("Announced auth needed on Chromecast")
+        logger.debug("Announced auth needed on Chromecast")
         browser.stop_discovery()
     except Exception as e:
         logger.error(f"Failed to announce: {e}")
@@ -41,14 +41,14 @@ def authenticate_tidal():
     """
     Authenticate with Tidal using OAuth simple flow.
     """
-    logger.info("Starting Tidal authentication...")
+    logger.debug("Starting Tidal authentication...")
 
     # Create session
     session = tidalapi.Session()
 
     # Use OAuth simple (TV) flow
     try:
-        logger.info("Initiating OAuth authentication...")
+        logger.debug("Initiating OAuth authentication...")
         print()
         print("A browser window will open for authorization.")
         print("If it doesn't open automatically, copy and paste the URL shown.")
@@ -64,7 +64,7 @@ def authenticate_tidal():
     # Save session for future use
     save_session(session)
 
-    logger.info(f"Session saved to: {TIDAL_CONFIG['session_file']}")
+    logger.debug(f"Session saved to: {TIDAL_CONFIG['session_file']}")
     return session
 
 def save_session(session):
@@ -107,7 +107,7 @@ def load_tidal_session():
 
             # Verify session is still valid (this also refreshes tokens if needed)
             if session.check_login():
-                logger.info("Loaded existing Tidal session")
+                logger.debug("Loaded existing Tidal session")
                 # Save refreshed tokens
                 save_session(session)
                 return session

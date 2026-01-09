@@ -33,13 +33,13 @@ if COMMAND_RECOGNITION == 'google':
     try:
         from cloud_recognizer import CloudRecognizer
         CLOUD_AVAILABLE = True
-        logger.info("Cloud speech recognition enabled (Google)")
+        logger.debug("Cloud speech recognition enabled (Google)")
     except ImportError as e:
         logger.warning(f"Cloud recognizer not available: {e}. Falling back to Vosk.")
         CLOUD_AVAILABLE = False
 else:
     CLOUD_AVAILABLE = False
-    logger.info("Using Vosk for command recognition (cloud disabled)")
+    logger.debug("Using Vosk for command recognition (cloud disabled)")
 
 class AudioProcessor:
     """
@@ -83,7 +83,7 @@ class AudioProcessor:
         self.cloud_recognizer = None
         if CLOUD_AVAILABLE:
             self.cloud_recognizer = CloudRecognizer()
-            logger.info("Cloud recognizer initialized for command recognition")
+            logger.debug("Cloud recognizer initialized for command recognition")
 
         # Vosk Model (used for wake word detection, fallback for commands)
         model_path = VOSK_MODEL_PATH
@@ -91,12 +91,12 @@ class AudioProcessor:
         if not model_dir.exists():
             raise FileNotFoundError(f"Vosk model not found at: {model_path}")
 
-        logger.info(f"Loading Vosk model from: {model_path}")
+        logger.debug(f"Loading Vosk model from: {model_path}")
         self.model = Model(str(model_dir))
 
         # Wake phrases for detection
         self.wake_phrases = [phrase.lower().strip() for phrase in WAKE_WORDS]
-        logger.info(f"Wake phrases: {self.wake_phrases}")
+        logger.debug(f"Wake phrases: {self.wake_phrases}")
 
         # Vosk recognizer for wake word detection
         # Also used as fallback for commands if cloud is unavailable
@@ -113,14 +113,14 @@ class AudioProcessor:
             frames_per_buffer=CHUNK_SIZE,
             input_device_index=AUDIO_INPUT_DEVICE_INDEX
         )
-        logger.info("Audio stream opened.")
+        logger.debug("Audio stream opened.")
 
     def run(self):
         """
         Starts the main audio processing loop.
         This is a blocking call.
         """
-        logger.info(f"Starting audio processing loop. Initial state: {self.state}")
+        logger.debug(f"Starting audio processing loop. Initial state: {self.state}")
         self.stream.start_stream()
 
         try:
@@ -179,7 +179,7 @@ class AudioProcessor:
         if matched:
             command_text = text[end_idx:].strip()
             if command_text:
-                logger.info(f"Extracted command: '{command_text}'")
+                logger.debug(f"Extracted command: '{command_text}'")
                 return (True, command_text)
             else:
                 return (True, None)
@@ -198,17 +198,17 @@ class AudioProcessor:
 
             if text:
                 # Always log what we heard for debugging
-                logger.info(f"Heard: '{text}'")
+                logger.debug(f"Heard: '{text}'")
                 wake_found, command_text = self._extract_command_after_wake_word(text)
 
                 if wake_found or was_pending:
                     if not was_pending:
-                        logger.info(f"Wake word detected!")
+                        logger.debug("Wake word detected")
                         self.on_wake_word()
 
                     if command_text:
                         # Command was included with wake word - process immediately
-                        logger.info(f"Command included with wake word: '{command_text}'")
+                        logger.debug(f"Command included with wake word: '{command_text}'")
                         # Build alternatives list from result
                         alternatives = self._build_command_alternatives(result, command_text)
                         self.on_command(alternatives)
@@ -218,25 +218,25 @@ class AudioProcessor:
                         self.state = self.STATE_LISTENING_COMMAND
                         self._command_listen_start_time = time.time()
                         self.recognizer.Reset()
-                        logger.info(f"State changed to: {self.state}")
+                        logger.debug(f"State changed to: {self.state}")
         else:
             # Check partial results for early wake word detection
             partial = json.loads(self.recognizer.PartialResult())
             partial_text = partial.get('partial', '').strip()
             if partial_text:
-                logger.info(f"Partial: '{partial_text}'")
+                logger.debug(f"Partial: '{partial_text}'")
 
                 # Check if wake word is in partial result
                 wake_found, end_idx = self._is_wake_word_match(partial_text)
                 if wake_found and not getattr(self, '_wake_word_pending', False):
-                    logger.info(f"Wake word detected in partial!")
+                    logger.debug("Wake word detected in partial")
                     self._wake_word_pending = True
                     self.on_wake_word()  # Play beep to acknowledge
 
                     # Switch to command mode immediately
                     self.state = self.STATE_LISTENING_COMMAND
                     self._command_listen_start_time = time.time()
-                    logger.info(f"State changed to: {self.state}")
+                    logger.debug(f"State changed to: {self.state}")
 
     def _build_command_alternatives(self, result, primary_command):
         """
@@ -299,7 +299,7 @@ class AudioProcessor:
 
         # Try cloud recognition first if available
         if self.cloud_recognizer and self._audio_buffer:
-            logger.info("Sending audio to Google Speech API...")
+            logger.debug("Sending audio to Google Speech API...")
             audio_bytes = b''.join(self._audio_buffer)
 
             try:
@@ -314,7 +314,7 @@ class AudioProcessor:
 
         # Fall back to Vosk if cloud failed or unavailable
         if not alternatives:
-            logger.info("Using Vosk fallback for command recognition")
+            logger.debug("Using Vosk fallback for command recognition")
             final_result = self.recognizer.FinalResult()
             result = json.loads(final_result)
 
@@ -327,7 +327,7 @@ class AudioProcessor:
                     if alt_text and alt_text not in alternatives:
                         alternatives.append(alt_text)
             elif self._last_command_partial:
-                logger.info(f"Using last partial: '{self._last_command_partial}'")
+                logger.debug(f"Using last partial: '{self._last_command_partial}'")
                 alternatives = [self._last_command_partial]
 
         # Clean up any wake word remnants from alternatives
@@ -350,7 +350,7 @@ class AudioProcessor:
                 unique_alternatives.append(alt)
 
         if unique_alternatives:
-            logger.info(f"Command alternatives: {unique_alternatives}")
+            logger.debug(f"Command alternatives: {unique_alternatives}")
         else:
             logger.warning("No command recognized")
 
@@ -358,7 +358,7 @@ class AudioProcessor:
 
     def _handle_command_from_text(self, text):
         """Handle command from raw text (e.g., from partial result)."""
-        logger.info(f"Command heard: '{text}'")
+        logger.debug(f"Command heard: '{text}'")
 
         # Strip wake word if present
         matched, end_idx = self._is_wake_word_match(text)
@@ -368,7 +368,7 @@ class AudioProcessor:
             command = text.strip()
 
         if command:
-            logger.info(f"Command extracted: '{command}'")
+            logger.debug(f"Command extracted: '{command}'")
             self.on_command([command])
         else:
             logger.warning("No command after wake word.")
@@ -380,7 +380,7 @@ class AudioProcessor:
         main_text = result.get('text', '').strip()
 
         if main_text:
-            logger.info(f"Command heard: '{main_text}'")
+            logger.debug(f"Command heard: '{main_text}'")
             alternatives = [alt.get('text', '').strip() for alt in result.get('alternatives', []) if alt.get('text')]
             if main_text not in alternatives:
                 alternatives.insert(0, main_text)
@@ -398,7 +398,7 @@ class AudioProcessor:
             # Remove empty strings
             cleaned = [c for c in cleaned if c]
 
-            logger.info(f"Command alternatives: {cleaned}")
+            logger.debug(f"Command alternatives: {cleaned}")
             self.on_command(cleaned)
         else:
             logger.warning("No command text was recognized.")
@@ -411,7 +411,7 @@ class AudioProcessor:
         self._last_command_partial = ""
         self._audio_buffer = []  # Clear audio buffer
         self.state = self.STATE_LISTENING_WAKE_WORD
-        logger.info(f"State changed back to: {self.state}")
+        logger.debug(f"State changed back to: {self.state}")
 
     def cleanup(self):
         """Clean up audio resources."""
@@ -420,4 +420,4 @@ class AudioProcessor:
             self.stream.close()
         if self.audio:
             self.audio.terminate()
-        logger.info("Audio processor cleaned up.")
+        logger.debug("Audio processor cleaned up.")

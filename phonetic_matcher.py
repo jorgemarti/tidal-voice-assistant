@@ -20,7 +20,7 @@ class PhoneticMatcher:
         self._ensure_nltk_resources()
         try:
             self.g2p = G2p()
-            logger.info("Phonetic converter (g2p-en) initialized.")
+            logger.debug("Phonetic converter (g2p-en) initialized.")
         except Exception as e:
             logger.error(f"Failed to initialize g2p-en: {e}")
             logger.error("Please make sure you have run: pip install -r requirements.txt")
@@ -41,7 +41,7 @@ class PhoneticMatcher:
             try:
                 nltk.download('averaged_perceptron_tagger', quiet=True)
                 print("...download complete.")
-                logger.info("NLTK resource downloaded successfully.")
+                logger.debug("NLTK resource downloaded successfully.")
             except Exception as e:
                 logger.error(f"Failed to download NLTK resource: {e}")
                 print("\nERROR: Failed to download NLTK resource.")
@@ -91,7 +91,7 @@ class PhoneticMatcher:
         if not candidates:
             return None
 
-        logger.info(f"Finding best phonetic match for '{query_text}' among {len(candidates)} candidates.")
+        logger.debug(f"Finding best phonetic match for '{query_text}' among {len(candidates)} candidates.")
 
         query_phonemes = self._get_phonemes(query_text)
         if not query_phonemes:
@@ -124,7 +124,7 @@ class PhoneticMatcher:
             logger.warning(f"Falling back to the first result from search: '{candidates[0]}'")
             return candidates[0]
 
-        logger.info(f"Best phonetic match: '{best_match}' (Score: {highest_score})")
+        logger.debug(f"Best phonetic match: '{best_match}' (Score: {highest_score})")
         return best_match
 
 if __name__ == '__main__':

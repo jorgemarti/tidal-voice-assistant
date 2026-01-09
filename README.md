@@ -404,6 +404,22 @@ LOG_LEVEL=WARNING   # Only warnings and errors
 - [ ] Better error handling and user feedback
 - [ ] Integration with Home Assistant
 
+## 🌐 External API Dependencies
+
+This project contacts the following external services:
+
+| Service | Purpose | URL(s) | Library |
+|---------|---------|--------|---------|
+| **Google Speech API** | Command recognition (after wake word) | `http://www.google.com/speech-api/v2/recognize` | SpeechRecognition |
+| **Google Translate TTS** | Voice announcements on Nest Mini | `https://translate.google.com/translate_tts` | Direct URL |
+| **Google Actions Sounds** | Activation beep sound | `https://actions.google.com/sounds/v1/alarms/beep_short.ogg` | Direct URL |
+| **Tidal API** | Music search, streaming URLs, track radio | `https://api.tidal.com/*` | tidalapi |
+| **Tidal Auth** | OAuth authentication | `https://auth.tidal.com/*`, `https://login.tidal.com/*` | tidalapi |
+
+**Local/Offline components:**
+- **Vosk** - Wake word detection runs entirely offline using downloaded Spanish model
+- **Chromecast** - Communication with Nest Mini happens on local network (mDNS discovery + local streaming)
+
 ## 📚 Resources
 
 - [Vosk Speech Recognition](https://alphacephei.com/vosk/)

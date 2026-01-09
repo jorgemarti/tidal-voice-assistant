@@ -53,7 +53,7 @@ class TidalPlayer:
         Plays a short sound on the Chromecast to indicate the wake word was detected.
         Runs in a separate thread to be non-blocking.
         """
-        logger.info("Playing activation sound")
+        logger.debug("Playing activation sound")
         thread = threading.Thread(target=self._play_sound_async)
         thread.daemon = True
         thread.start()
@@ -86,7 +86,7 @@ class TidalPlayer:
         delay = RETRY_DELAY_SECONDS
 
         for attempt in range(1, max_attempts + 1):
-            logger.info(f"Searching for Chromecast: '{self.chromecast_name}' (attempt {attempt}/{max_attempts})")
+            logger.debug(f"Searching for Chromecast: '{self.chromecast_name}' (attempt {attempt}/{max_attempts})")
 
             try:
                 # Stop any existing browser
@@ -100,7 +100,7 @@ class TidalPlayer:
                 if not chromecasts:
                     logger.warning(f"Chromecast '{self.chromecast_name}' not found")
                     if attempt < max_attempts:
-                        logger.info(f"Retrying in {delay} seconds...")
+                        logger.debug(f"Retrying in {delay} seconds...")
                         time.sleep(delay)
                         delay *= RETRY_BACKOFF_MULTIPLIER
                         continue
@@ -124,7 +124,7 @@ class TidalPlayer:
             except Exception as e:
                 logger.error(f"Error finding Chromecast: {e}")
                 if attempt < max_attempts:
-                    logger.info(f"Retrying in {delay} seconds...")
+                    logger.debug(f"Retrying in {delay} seconds...")
                     time.sleep(delay)
                     delay *= RETRY_BACKOFF_MULTIPLIER
                 else:
@@ -156,7 +156,7 @@ class TidalPlayer:
 
         for attempt in range(1, max_attempts + 1):
             try:
-                logger.info(f"Searching Tidal for {search_type}: '{query}' (attempt {attempt}/{max_attempts})")
+                logger.debug(f"Searching Tidal for {search_type}: '{query}' (attempt {attempt}/{max_attempts})")
                 search_result = self.session.search(query, limit=limit)
 
                 # tidalapi 0.8+ returns a dict with 'tracks', 'artists', 'albums' keys
@@ -183,7 +183,7 @@ class TidalPlayer:
             except Exception as e:
                 logger.error(f"Tidal search error: {e}")
                 if attempt < max_attempts:
-                    logger.info(f"Retrying in {delay} seconds...")
+                    logger.debug(f"Retrying in {delay} seconds...")
                     time.sleep(delay)
                     delay *= RETRY_BACKOFF_MULTIPLIER
                 else:
@@ -240,7 +240,7 @@ class TidalPlayer:
             except Exception as e:
                 logger.error(f"{'Queue' if enqueue else 'Playback'} error: {e}")
                 if attempt < max_attempts:
-                    logger.info(f"Retrying in {delay} seconds...")
+                    logger.debug(f"Retrying in {delay} seconds...")
                     time.sleep(delay)
                     delay *= RETRY_BACKOFF_MULTIPLIER
                 else:
@@ -260,7 +260,7 @@ class TidalPlayer:
             True if successful, False otherwise
         """
         try:
-            logger.info(f"Getting top tracks from: {artist.name}")
+            logger.debug(f"Getting top tracks from: {artist.name}")
             top_tracks = artist.get_top_tracks(limit=limit)
 
             if not top_tracks:
@@ -271,7 +271,7 @@ class TidalPlayer:
             top_tracks = list(top_tracks)
             random.shuffle(top_tracks)
 
-            logger.info(f"Queueing {len(top_tracks)} shuffled tracks from {artist.name}")
+            logger.debug(f"Queueing {len(top_tracks)} shuffled tracks from {artist.name}")
 
             # Announce the first track
             first_track = top_tracks[0]
@@ -284,7 +284,7 @@ class TidalPlayer:
                     # If first track fails, abort
                     return False
 
-            logger.info(f"Queued {len(top_tracks)} tracks for continuous playback")
+            logger.debug(f"Queued {len(top_tracks)} tracks for continuous playback")
             return True
 
         except Exception as e:
@@ -302,7 +302,7 @@ class TidalPlayer:
             True if successful, False otherwise
         """
         try:
-            logger.info(f"Playing album: {album.name} by {album.artist.name}")
+            logger.debug(f"Playing album: {album.name} by {album.artist.name}")
             logger.debug(f"Album has {album.num_tracks} tracks")
 
             tracks = album.tracks()
@@ -310,7 +310,7 @@ class TidalPlayer:
                 logger.warning("No tracks found in album")
                 return False
 
-            logger.info(f"Queueing {len(tracks)} tracks from album: {album.name}")
+            logger.debug(f"Queueing {len(tracks)} tracks from album: {album.name}")
 
             # Play first track, queue the rest
             for i, track in enumerate(tracks):
@@ -319,7 +319,7 @@ class TidalPlayer:
                     # If first track fails, abort
                     return False
 
-            logger.info(f"Queued {len(tracks)} tracks for continuous playback")
+            logger.debug(f"Queued {len(tracks)} tracks for continuous playback")
             return True
 
         except Exception as e:
@@ -337,7 +337,7 @@ class TidalPlayer:
             True if successful, False otherwise
         """
         try:
-            logger.info(f"Playing playlist: {playlist.name}")
+            logger.debug(f"Playing playlist: {playlist.name}")
             logger.debug(f"Playlist has {playlist.num_tracks} tracks")
 
             tracks = playlist.tracks()
@@ -345,7 +345,7 @@ class TidalPlayer:
                 logger.warning("No tracks found in playlist")
                 return False
 
-            logger.info(f"Queueing {len(tracks)} tracks from playlist: {playlist.name}")
+            logger.debug(f"Queueing {len(tracks)} tracks from playlist: {playlist.name}")
 
             # Play first track, queue the rest
             for i, track in enumerate(tracks):
@@ -353,7 +353,7 @@ class TidalPlayer:
                 if not success and i == 0:
                     return False
 
-            logger.info(f"Queued {len(tracks)} tracks for continuous playback")
+            logger.debug(f"Queued {len(tracks)} tracks for continuous playback")
             return True
 
         except Exception as e:
@@ -384,15 +384,15 @@ class TidalPlayer:
 
             # Queue similar tracks if autoplay is enabled
             if autoplay:
-                logger.info(f"Getting similar tracks for autoplay...")
+                logger.debug("Getting similar tracks for autoplay...")
                 try:
                     radio_tracks = track.get_track_radio(limit=AUTOPLAY_TRACK_COUNT)
 
                     if radio_tracks:
-                        logger.info(f"Queueing {len(radio_tracks)} similar tracks")
+                        logger.debug(f"Queueing {len(radio_tracks)} similar tracks")
                         for radio_track in radio_tracks:
                             self.play_track(radio_track, enqueue=True)
-                        logger.info(f"Autoplay enabled with {len(radio_tracks)} tracks queued")
+                        logger.debug(f"Autoplay enabled with {len(radio_tracks)} tracks queued")
                     else:
                         logger.warning("No similar tracks found for autoplay")
 
@@ -452,7 +452,7 @@ class TidalPlayer:
             # This is safer than relying on list indices
             best_match_object = next((r for r in results if r.name == best_name), results[0])
 
-        logger.info(f"Phonetic match selected: '{best_match_object.name}'")
+        logger.debug(f"Phonetic match selected: '{best_match_object.name}'")
 
         # 3. Announce and play the best-matched item
         if search_type == 'track':
@@ -524,7 +524,7 @@ class TidalPlayer:
             import urllib.parse
             tts_url = f"https://translate.google.com/translate_tts?ie=UTF-8&client=tw-ob&tl={lang}&q={urllib.parse.quote(message)}"
 
-            logger.info(f"Speaking: {message}")
+            logger.debug(f"Speaking: {message}")
             self.media_controller.play_media(tts_url, 'audio/mp3')
 
             # Wait for media to start

@@ -35,7 +35,7 @@ class CloudRecognizer:
         self.recognizer.energy_threshold = 300
         self.recognizer.pause_threshold = 0.8  # Seconds of silence to consider phrase complete
 
-        logger.info(f"Cloud recognizer initialized (language: {self.language})")
+        logger.debug(f"Cloud recognizer initialized (language: {self.language})")
 
     def recognize_from_audio_data(self, audio_data, sample_rate=16000, sample_width=2):
         """
@@ -76,12 +76,12 @@ class CloudRecognizer:
                         logger.debug(f"Alternative: '{transcript}' (confidence: {confidence:.2f})")
 
                 if alternatives:
-                    logger.info(f"Google recognized: '{alternatives[0]}'")
+                    logger.debug(f"Google recognized: '{alternatives[0]}'")
 
             elif isinstance(result, str):
                 # Simple string result (older API response)
                 alternatives = [result.strip()]
-                logger.info(f"Google recognized: '{result}'")
+                logger.debug(f"Google recognized: '{result}'")
 
             return alternatives
 
@@ -116,10 +116,10 @@ class CloudRecognizer:
                 mic_kwargs['device_index'] = device_index
 
             with sr.Microphone(**mic_kwargs) as source:
-                logger.info("Adjusting for ambient noise...")
+                logger.debug("Adjusting for ambient noise...")
                 self.recognizer.adjust_for_ambient_noise(source, duration=0.5)
 
-                logger.info("Listening for command...")
+                logger.debug("Listening for command...")
                 audio = self.recognizer.listen(
                     source,
                     timeout=timeout,
@@ -130,7 +130,7 @@ class CloudRecognizer:
                     audio,
                     language=self.language
                 )
-                logger.info(f"Recognized: {text}")
+                logger.debug(f"Recognized: {text}")
                 return text
 
         except sr.WaitTimeout:

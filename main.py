@@ -28,7 +28,7 @@ def on_wake_word_detected():
     # - If music is playing, pause first and use short prompt
     # - If idle, use full prompt
     if tidal_player.is_playing():
-        logger.info("Music is playing - pausing for command")
+        logger.debug("Music is playing - pausing for command")
         tidal_player.pause()
         tidal_player.speak("¿Sí?", wait=True)
     else:
@@ -50,7 +50,7 @@ def on_command_received(alternatives):
         tidal_player.play()  # Resume if was paused
         return
 
-    logger.info(f"Command alternatives received: {alternatives}")
+    logger.debug(f"Command alternatives received: {alternatives}")
 
     # Parse command by trying each alternative
     parsed = None
@@ -58,7 +58,7 @@ def on_command_received(alternatives):
         parsed_attempt = command_parser.parse(command_text)
         if parsed_attempt:
             parsed = parsed_attempt
-            logger.info(f"Using parsed command from: '{command_text}'")
+            logger.debug(f"Using parsed command from: '{command_text}'")
             break
 
     if not parsed:
@@ -67,7 +67,7 @@ def on_command_received(alternatives):
         tidal_player.play()  # Resume if was paused
         return
 
-    logger.info(f"Parsed action: {parsed['action']}, query: '{parsed.get('query')}'")
+    logger.debug(f"Parsed action: {parsed['action']}, query: '{parsed.get('query')}'")
 
     # Handle playback control commands
     action = parsed['action']
