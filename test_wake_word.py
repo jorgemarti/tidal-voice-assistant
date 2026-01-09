@@ -89,8 +89,13 @@ def test_continuous_transcription():
     print("Press Ctrl+C to stop")
     print()
 
+    p = None
+    stream = None
     try:
         model = Model(VOSK_MODEL_PATH)
+        recognizer = KaldiRecognizer(model, SAMPLE_RATE)
+
+        p = pyaudio.PyAudio()
         stream = p.open(
             format=pyaudio.paInt16,
             channels=1,
@@ -98,7 +103,7 @@ def test_continuous_transcription():
             input=True,
             frames_per_buffer=CHUNK_SIZE,
             input_device_index=AUDIO_INPUT_DEVICE_INDEX
-
+        )
 
         print("🎤 Listening... (speak now)")
         print()
@@ -113,7 +118,7 @@ def test_continuous_transcription():
                 if text:
                     # Check if it contains wake words
                     text_lower = text.lower()
-                    has_wake_word = ('hey tidal' in text_lower or 'oye tidal' in text_lower)
+                    has_wake_word = any(phrase in text_lower for phrase in WAKE_WORDS)
 
                     if has_wake_word:
                         print(f"✅ WAKE WORD DETECTED: '{text}'")
@@ -126,9 +131,11 @@ def test_continuous_transcription():
         print(f"\n❌ Error: {e}")
         return False
     finally:
-        stream.stop_stream()
-        stream.close()
-        p.terminate()
+        if stream and stream.is_active():
+            stream.stop_stream()
+            stream.close()
+        if p:
+            p.terminate()
 
     return True
 
