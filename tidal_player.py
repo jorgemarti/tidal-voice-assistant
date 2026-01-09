@@ -490,13 +490,14 @@ class TidalPlayer:
 
         return False
 
-    def speak(self, message, lang='es'):
+    def speak(self, message, lang='es', wait=True):
         """
         Speak a message on the Chromecast using Google TTS.
 
         Args:
             message: Text to speak
             lang: Language code (default: 'es' for Spanish)
+            wait: Wait for speech to complete before returning (default: True)
         """
         if not self.cast_device and not self.find_chromecast():
             logger.error("Cannot speak: Chromecast not found")
@@ -509,6 +510,12 @@ class TidalPlayer:
             self.media_controller.play_media(tts_url, 'audio/mp3')
             self.media_controller.block_until_active()
             logger.info(f"Speaking: {message}")
+
+            if wait:
+                # Estimate speech duration: ~80ms per character + 500ms buffer
+                wait_time = len(message) * 0.08 + 0.5
+                time.sleep(wait_time)
+
             return True
         except Exception as e:
             logger.error(f"TTS error: {e}")
