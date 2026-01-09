@@ -291,6 +291,7 @@ For non-music commands, user continues using:
 ### System Packages
 ```bash
 portaudio19-dev     # Audio I/O (pyaudio installed via pip)
+flac                # Audio conversion for Google Speech API
 ```
 
 ### Python Packages
