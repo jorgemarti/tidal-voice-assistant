@@ -6,6 +6,7 @@ import tidalapi
 from tidal_auth import load_tidal_session
 import pychromecast
 import time
+from phonetic_matcher import PhoneticMatcher
 from config import (
     CHROMECAST_NAME, TIDAL_CONFIG, setup_logging,
     RETRY_MAX_ATTEMPTS, RETRY_DELAY_SECONDS, RETRY_BACKOFF_MULTIPLIER,
@@ -31,6 +32,7 @@ class TidalPlayer:
         self.cast_device = None
         self.media_controller = None
         self.browser = None  # Store browser for cleanup
+        self.phonetic_matcher = PhoneticMatcher()
 
         # Load Tidal session
         logger.info("Loading Tidal session...")
@@ -366,6 +368,65 @@ class TidalPlayer:
         except Exception as e:
             logger.error(f"Error playing track with autoplay: {e}")
             return False
+
+    def phonetic_search_and_play(self, query, search_type='track'):
+        """
+        Search Tidal, use phonetic matching to find the best result, and play it.
+        This is a two-stage search:
+        1. Broad search on Tidal using the (potentially flawed) transcribed query.
+        2. Phonetic matching on the results to find the most likely candidate.
+
+        Args:
+            query: Search query from speech transcription
+            search_type: 'track', 'artist', or 'album'
+
+        Returns:
+            True if successful, False otherwise
+        """
+        # Ensure Chromecast is connected
+        if not self.cast_device and not self.find_chromecast():
+            return False
+
+        # 1. Broad search on Tidal to get candidates
+        # We get more results (limit=10) to have a good pool for phonetic matching
+        results = self.search_tidal(query, search_type, limit=10)
+
+        if not results:
+            logger.warning(f"No results found for: '{query}'")
+            # Maybe speak this to the user
+            self.speak(f"No pude encontrar nada para {query}")
+            return False
+
+        # 2. Use phonetic matching to find the best candidate
+        # Get a list of just the names from the result objects
+        candidate_names = [r.name for r in results]
+        
+        # Find the best name using our matcher
+        best_name = self.phonetic_matcher.find_best_match(query, candidate_names)
+
+        if not best_name:
+            # This shouldn't happen if results were found, but as a fallback...
+            best_match_object = results[0]
+        else:
+            # Find the full object that corresponds to the best name
+            # This is safer than relying on list indices
+            best_match_object = next((r for r in results if r.name == best_name), results[0])
+
+        logger.info(f"Phonetic match selected: '{best_match_object.name}'")
+
+        # 3. Play the best-matched item
+        if search_type == 'track':
+            return self.play_track_with_autoplay(best_match_object)
+        elif search_type == 'artist':
+            return self.play_artist_top_tracks(best_match_object)
+        elif search_type == 'album':
+            return self.play_album(best_match_object)
+        elif search_type == 'playlist':
+            # Playlists often have very specific names, phonetic search might not
+            # be as useful, but we can still use it.
+            return self.play_playlist(best_match_object)
+
+        return False
 
     def search_and_play(self, query, search_type='track'):
         """

@@ -16,5 +16,11 @@ python-dotenv==1.0.0
 # Utilities
 requests>=2.32.3
 
+# Phonetic matching
+g2p-en==2.1.0
+fuzzywuzzy==0.18.0
+# For better performance, install python-Levenshtein
+# pip install python-Levenshtein
+
 # Text-to-speech for testing (optional)
 gtts==2.5.0

@@ -117,9 +117,9 @@ def main():
                     logger.info("Skipped to next track")
                     continue
 
-                # Execute music search and playback
+                # Execute music search and playback with phonetic matching
                 search_type = command_parser.get_search_type(parsed['action'])
-                success = tidal_player.search_and_play(parsed['query'], search_type)
+                success = tidal_player.phonetic_search_and_play(parsed['query'], search_type)
 
                 if success:
                     logger.info("Music is playing!")
