@@ -129,6 +129,12 @@ class AudioProcessor:
             result_json = self.command_recognizer.Result()
             self._handle_command_result(result_json)
             self._reset_to_wake_word_state()
+        else:
+            # Log partial results for debugging
+            partial_result_json = self.command_recognizer.PartialResult()
+            partial_result = json.loads(partial_result_json)
+            if partial_result.get("partial") and partial_result["partial"] != "":
+                logger.debug(f"Partial result: {partial_result['partial']}")
 
     def _handle_command_result(self, result_json):
         """Parse result JSON and invoke on_command callback if text is found."""
