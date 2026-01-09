@@ -1,177 +1,113 @@
 #!/usr/bin/env python3
 """
-Tidal Voice Assistant - Main Application
-Voice-controlled Tidal music player for Google Nest Mini via Raspberry Pi
+Tidal Voice Assistant - Main Application (Refactored)
 """
 
-from wake_word import WakeWordDetector
-from speech_recognition import SpeechRecognizer
+from audio_processor import AudioProcessor
 from command_parser import MusicCommandParser
 from tidal_player import TidalPlayer
 from config import setup_logging
 import sys
 
+# Setup global logger
 logger = setup_logging(__name__)
+
+# Instantiate components that will be used in callbacks
+command_parser = MusicCommandParser()
+tidal_player = TidalPlayer()
 
 def print_banner():
     """Print application banner"""
-    print()
-    print("=" * 60)
+    print("\n" + "=" * 60)
     print("  Tidal Voice Assistant for Raspberry Pi")
-    print("=" * 60)
-    print()
+    print("=" * 60 + "\n")
 
-def print_instructions():
-    """Print usage instructions"""
-    print("Instructions:")
-    print("  1. Say 'Hey Tidal' or 'Oye Tidal' (wake word)")
-    print("  2. Speak your music command in Spanish:")
-    print()
-    print("     Music playback:")
-    print("     - 'reproduce bohemian rhapsody'")
-    print("     - 'pon música de queen'")
-    print("     - 'reproduce el álbum a night at the opera'")
-    print("     - 'reproduce la playlist rock clásico'")
-    print()
-    print("     Playback controls:")
-    print("     - 'para' or 'stop' (stop playback)")
-    print("     - 'pausa' (pause)")
-    print("     - 'continúa' or 'sigue' (resume)")
-    print("     - 'siguiente' or 'salta' (skip track)")
-    print()
-    print("For other commands (weather, timers), use:")
-    print("  'Ok Google, ¿qué tiempo hace?'")
-    print("  'Ok Google, pon un temporizador de 5 minutos'")
-    print()
-    print("Press Ctrl+C to exit")
-    print()
+def on_wake_word_detected():
+    """Callback executed when wake word is detected."""
+    tidal_player.play_activation_sound()
+
+def on_command_timeout():
+    """Callback executed when command listening times out."""
+    logger.warning("Command listening timed out.")
+    # You could have the assistant say "I'm still here" or similar
+    
+def on_command_received(alternatives):
+    """
+    Callback executed when a command is recognized.
+    This contains the main application logic.
+    """
+    if not alternatives:
+        logger.warning("No command detected, listening for wake word again...")
+        return
+
+    logger.info(f"Command alternatives received: {alternatives}")
+
+    # Parse command by trying each alternative
+    parsed = None
+    for command_text in alternatives:
+        parsed_attempt = command_parser.parse(command_text)
+        if parsed_attempt:
+            parsed = parsed_attempt
+            logger.info(f"Using parsed command from: '{command_text}'")
+            break
+
+    if not parsed:
+        logger.warning("Could not understand music command from any alternative.")
+        tidal_player.speak("No entendí el comando.")
+        return
+
+    logger.info(f"Parsed action: {parsed['action']}, query: '{parsed.get('query')}'")
+
+    # Handle playback control commands
+    action = parsed['action']
+    if action == 'stop':
+        tidal_player.stop()
+    elif action == 'pause':
+        tidal_player.pause()
+    elif action == 'resume':
+        tidal_player.play()
+    elif action == 'skip':
+        tidal_player.skip()
+    else:
+        # It's a music search command, execute it
+        search_type = command_parser.get_search_type(action)
+        query = parsed.get('query')
+        if query:
+            success = tidal_player.phonetic_search_and_play(query, search_type)
+            if not success:
+                logger.error(f"Failed to play '{query}'")
+        else:
+            logger.error("Music command received without a query.")
 
 def main():
-    """Main application loop"""
+    """Main application entry point."""
     print_banner()
 
     try:
-        # Initialize components
-        logger.info("Initializing components...")
-
-        wake_detector = WakeWordDetector()
+        logger.info("Initializing audio processor...")
         
-        # Share the Vosk model and, crucially, the audio stream to prevent conflicts
-        speech_recognizer = SpeechRecognizer(
-            model=wake_detector.get_model(),
-            audio_instance=wake_detector.get_audio_instance(),
-            audio_stream=wake_detector.get_audio_stream()
+        # The AudioProcessor now orchestrates everything
+        audio_processor = AudioProcessor(
+            on_wake_word=on_wake_word_detected,
+            on_command=on_command_received,
+            on_timeout=on_command_timeout
         )
         
-        command_parser = MusicCommandParser()
-        tidal_player = TidalPlayer()
-
-        logger.info("All components initialized successfully")
-        print()
-        print("=" * 60)
-        print("  All components initialized successfully!")
-        print("=" * 60)
-        print()
-
-        print_instructions()
-        logger.info("Ready! Listening for wake word...")
-        print()
-
-        # Main loop
-        while True:
-            try:
-                # Wait for wake word
-                wake_detected = wake_detector.listen()
-
-                if not wake_detected:
-                    continue
-                
-                # Play feedback sound to indicate the assistant is listening
-                tidal_player.play_activation_sound()
-
-                # Listen for command (now returns a list of alternatives)
-                command_alternatives = speech_recognizer.listen_for_command()
-
-                if not command_alternatives:
-                    logger.warning("No command detected, listening for wake word again...")
-                    continue
-
-                logger.info(f"Command alternatives received: {command_alternatives}")
-
-                # Parse command by trying each alternative
-                parsed = None
-                for command_text in command_alternatives:
-                    parsed_attempt = command_parser.parse(command_text)
-                    if parsed_attempt:
-                        # Found a parsable command
-                        parsed = parsed_attempt
-                        logger.info(f"Using parsed command from: '{command_text}'")
-                        break  # Stop on the first valid command
-
-                if not parsed:
-                    logger.warning("Could not understand music command from any alternative")
-                    # Let the user know we didn't understand
-                    tidal_player.speak("No entendí el comando.")
-                    continue
-
-                logger.info(f"Parsed action: {parsed['action']}, query: '{parsed['query']}'")
-
-                # Handle playback control commands
-                if parsed['action'] == 'stop':
-                    tidal_player.stop()
-                    logger.info("Playback stopped")
-                    continue
-                elif parsed['action'] == 'pause':
-                    tidal_player.pause()
-                    logger.info("Playback paused")
-                    continue
-                elif parsed['action'] == 'resume':
-                    tidal_player.play()
-                    logger.info("Playback resumed")
-                    continue
-                elif parsed['action'] == 'skip':
-                    tidal_player.skip()
-                    logger.info("Skipped to next track")
-                    continue
-
-                # Execute music search and playback with phonetic matching
-                search_type = command_parser.get_search_type(parsed['action'])
-                success = tidal_player.phonetic_search_and_play(parsed['query'], search_type)
-
-                if success:
-                    logger.info("Music is playing!")
-                else:
-                    logger.error("Could not play music")
-
-                logger.info("Listening for wake word...")
-
-            except KeyboardInterrupt:
-                raise  # Re-raise to exit cleanly
-            except Exception as e:
-                logger.error(f"Error processing command: {e}")
-                logger.info("Listening for wake word...")
-                continue
-
-    except KeyboardInterrupt:
-        print()
-        logger.info("Shutting down...")
-        wake_detector.cleanup()
-        speech_recognizer.cleanup()
-        tidal_player.cleanup()
-        logger.info("Goodbye!")
+        logger.info("Initialization complete. Starting main loop...")
+        
+        # This is a blocking call that runs until KeyboardInterrupt
+        audio_processor.run()
 
     except FileNotFoundError as e:
-        logger.error(f"Configuration error: {e}")
-        print()
-        print("Make sure you have:")
-        print("  1. Downloaded the Spanish Vosk model")
-        print("  2. Set up your .env file with credentials")
-        print()
+        logger.error(f"A required file was not found: {e}")
+        print("\nERROR: Please ensure configuration is correct (e.g., .env file, Vosk model).")
+        sys.exit(1)
+        
+    except Exception as e:
+        logger.critical(f"A fatal error occurred: {e}", exc_info=True)
         sys.exit(1)
 
-    except Exception as e:
-        logger.critical(f"Fatal error: {e}", exc_info=True)
-        sys.exit(1)
+    print("\nApplication shut down gracefully.")
 
 if __name__ == "__main__":
     main()
