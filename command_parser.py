@@ -42,26 +42,26 @@ class MusicCommandParser:
             ],
             # Music search commands
             'play_playlist': [
-                r'reproduce (?:la )?(?:playlist|lista) (.+)',
+                r'(?:reproduce|reproducir) (?:la )?(?:playlist|lista) (.+)',
                 r'pon (?:la )?(?:playlist|lista) (.+)',
             ],
             'play_album': [
-                r'reproduce (?:el )?álbum (?:de )?(.+)',
+                r'(?:reproduce|reproducir) (?:el )?álbum (?:de )?(.+)',
                 r'pon (?:el )?álbum (?:de )?(.+)',
-                r'reproduce (?:el )?disco (?:de )?(.+)',
+                r'(?:reproduce|reproducir) (?:el )?disco (?:de )?(.+)',
                 r'pon (?:el )?disco (?:de )?(.+)',
             ],
             'play_artist': [
-                r'reproduce (?:música|canciones) de (.+)',
+                r'(?:reproduce|reproducir) (?:música|canciones) de (.+)',
                 r'pon (?:música|canciones) de (.+)',
-                r'reproduce algo de (.+)',
+                r'(?:reproduce|reproducir) algo de (.+)',
                 r'pon algo de (.+)',
-                r'reproduce (.+)(?:el artista|la banda)',
+                r'(?:reproduce|reproducir) (.+)(?:el artista|la banda)',
             ],
             'play_song': [
-                r'reproduce (?:la canción )?(.+?)(?:\s+de\s+|$)',
+                r'(?:reproduce|reproducir) (?:la canción )?(.+?)(?:\s+de\s+|$)',
                 r'pon (?:la canción )?(.+?)(?:\s+de\s+|$)',
-                r'reproduce (.+)',
+                r'(?:reproduce|reproducir) (.+)',
                 r'pon (.+)',
             ],
         }
