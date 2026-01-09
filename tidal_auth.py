@@ -6,6 +6,7 @@ import tidalapi
 import json
 import pychromecast
 import urllib.parse
+from datetime import datetime
 from config import TIDAL_CONFIG, CHROMECAST_NAME, setup_logging
 from pathlib import Path
 
@@ -92,12 +93,16 @@ def load_tidal_session():
 
             session = tidalapi.Session()
 
+            # Convert expiry_time string back to datetime object
+            expiry_time_str = data.get('expiry_time')
+            expiry_time = datetime.fromisoformat(expiry_time_str) if expiry_time_str else None
+
             # Load OAuth session
             session.load_oauth_session(
                 data['token_type'],
                 data['access_token'],
                 data['refresh_token'],
-                data['expiry_time']
+                expiry_time
             )
 
             # Verify session is still valid (this also refreshes tokens if needed)
