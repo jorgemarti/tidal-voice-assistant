@@ -35,7 +35,8 @@ Jorge has a Google Nest Mini (2nd gen) that he uses for:
 
 ### Software Stack
 - **Python 3.9+**
-- **Vosk**: Offline speech recognition and wake word detection (Spanish model)
+- **Vosk**: Offline wake word detection (Spanish model)
+- **Google Speech API**: Cloud-based command recognition (via SpeechRecognition library)
 - **tidalapi**: Tidal API integration
 - **pychromecast**: Google Cast protocol for streaming to Nest Mini
 - **pyaudio**: Audio capture
@@ -52,22 +53,34 @@ Jorge has a Google Nest Mini (2nd gen) that he uses for:
 
 For a detailed visual representation of the system architecture, see [architecture.svg](architecture.svg).
 
+**Hybrid Speech Recognition Architecture:**
+- **Wake Word Detection**: Vosk (local, offline, fast)
+- **Command Recognition**: Google Speech API (cloud, accurate, free)
+
 **Component Flow:**
-- User → Microphone → AudioProcessor (single Vosk recognizer)
-- AudioProcessor detects wake word in transcription, extracts command
-- Command Parser → Phonetic Matcher → Tidal Player
+- User → Microphone → AudioProcessor
+- AudioProcessor (Vosk) detects wake word locally
+- After wake word: Audio buffered → Google Speech API for accurate transcription
+- Transcribed command → Command Parser → Phonetic Matcher → Tidal Player
 - Tidal Player ↔ Tidal API (search, stream URLs)
 - Tidal Player → Pychromecast → Google Nest Mini (audio playback)
 
 ## Key Components
 
 ### 1. Audio Processor (`audio_processor.py`)
-- Centralized audio processing with single Vosk recognizer
-- Uses full model (not grammar-restricted) to capture wake word + command together
+- **Hybrid architecture**: Vosk for wake word, Google Speech API for commands
+- Vosk handles wake word detection locally (fast, offline)
+- After wake word: buffers audio and sends to Google for accurate transcription
+- Falls back to Vosk if Google is unavailable
 - Default wake phrases: "Okay música", "Okey música"
 - Flexible regex matching for wake word variations
-- Falls back to partial results when final result is empty
 - 8-second timeout for command listening
+
+### 1.1 Cloud Recognizer (`cloud_recognizer.py`)
+- Google Speech API integration via SpeechRecognition library
+- High accuracy for Spanish commands + international artist/song names
+- Free tier (no API key required)
+- Automatic fallback to Vosk if network unavailable
 
 ### 2. Phonetic Matcher (`phonetic_matcher.py`)
 - Uses g2p-en for grapheme-to-phoneme conversion
@@ -158,20 +171,25 @@ AUTOPLAY_ENABLED = True   # Enable continuous playback after a song ends
 AUTOPLAY_TRACK_COUNT = 10 # Number of similar tracks to queue for autoplay
 
 CHROMECAST_NAME = "Altavoz Google"  # User's Nest Mini name
+
+# Hybrid Speech Recognition
+COMMAND_RECOGNITION = 'google'  # 'google' (cloud) or 'vosk' (local fallback)
+COMMAND_LANGUAGE = 'es-ES'      # Spanish (Spain) for Google Speech API
 ```
 
 ## Usage Flow
 
 ### Music Playback Flow
-1. **User says**: "Hey Tidal, reproduce Bohemian Rhapsody"
-2. **Wake word detected**: Vosk detects "hey tidal" trigger phrase
-3. **Speech captured**: 5 seconds of audio recorded
-4. **Transcribed**: Vosk converts to text (Spanish)
+1. **User says**: "Okey música, reproduce Bohemian Rhapsody"
+2. **Wake word detected**: Vosk detects "okey música" locally (offline)
+3. **Audio buffered**: Command audio recorded to buffer
+4. **Cloud transcription**: Google Speech API accurately transcribes command
 5. **Parsed**: Command parser extracts "reproduce" + "Bohemian Rhapsody"
 6. **Searched**: Tidal API finds matching track
-7. **Streamed**: Pychromecast sends audio URL to Nest Mini
-8. **Playback**: Music plays on Nest Mini
-9. **Autoplay**: Similar tracks are automatically queued for continuous playback
+7. **Announced**: TTS announces "Reproduciendo Bohemian Rhapsody de Queen"
+8. **Streamed**: Pychromecast sends audio URL to Nest Mini
+9. **Playback**: Music plays on Nest Mini
+10. **Autoplay**: Similar tracks are automatically queued for continuous playback
 
 **Autoplay Behavior:**
 - **Single song**: Plays the requested track, then queues 10 similar tracks from Tidal's track radio
@@ -246,8 +264,8 @@ For non-music commands, user continues using:
 
 1. **Wake Word CPU Usage**: Vosk-based wake word uses ~15-25% CPU (continuous transcription) - acceptable for dedicated Pi 5
 2. **Wake Word Latency**: 200-500ms detection time (vs <50ms with cloud solutions like Picovoice)
-3. **Network Dependency**: Requires stable WiFi for both Pi and Nest Mini
-4. **Speech Recognition**: Works best in quiet environments
+3. **Network Dependency**: Requires stable WiFi for command recognition (Google API) and Chromecast
+4. **Wake Word Offline**: Wake word detection works without internet; only command recognition needs network
 5. **Tidal API**: Rate limits may apply for heavy usage
 6. **Language**: Currently only Spanish from Spain (could add Catalan)
 
@@ -255,16 +273,18 @@ For non-music commands, user continues using:
 
 - OAuth tokens stored in `tidal_session.json` (gitignored)
 - No passwords stored - OAuth device flow only
-- All wake word processing is local and offline (no cloud)
+- Wake word processing is local and offline (no cloud)
+- Command audio sent to Google Speech API only after wake word detected
 - No encryption on local audio capture (acceptable for home use)
 
 ## Performance Considerations
 
 - **Wake word detection**: 200-500ms latency, ~15-25% CPU usage (continuous Vosk)
-- **Speech recognition**: 1-2 seconds (offline, depends on audio quality)
+- **Command recognition**: 1-2 seconds (Google Speech API, high accuracy)
 - **Tidal search**: 500ms-1s (network dependent)
+- **TTS announcement**: 2-4 seconds
 - **Chromecast streaming**: <1s buffering
-- **Total response time**: 3-5 seconds from wake word to music playback
+- **Total response time**: 5-8 seconds from wake word to music playback (with TTS announcement)
 
 ## Dependencies
 
@@ -275,7 +295,8 @@ portaudio19-dev     # Audio I/O (pyaudio installed via pip)
 
 ### Python Packages
 ```
-vosk                # Speech recognition + wake word detection
+vosk                # Wake word detection (local, offline)
+SpeechRecognition   # Google Speech API for commands (cloud, accurate)
 pyaudio             # Audio capture
 tidalapi            # Tidal API
 pychromecast        # Chromecast protocol
@@ -289,7 +310,8 @@ gtts                # Text-to-speech (testing only)
 tidal-voice-assistant/
 ├── main.py                      # Entry point
 ├── config.py                    # Configuration
-├── audio_processor.py          # Centralized audio processing (wake word + commands)
+├── audio_processor.py          # Hybrid audio processing (Vosk wake word + Google commands)
+├── cloud_recognizer.py         # Google Speech API integration
 ├── command_parser.py           # Parse Spanish commands
 ├── phonetic_matcher.py         # Phonetic matching for fuzzy search
 ├── tidal_player.py             # Tidal + Chromecast
@@ -301,7 +323,8 @@ tidal-voice-assistant/
 ├── requirements.txt            # Python deps
 ├── .env.example                # Environment template
 ├── tidal-assistant.service     # Systemd service
-└── vosk-model-small-es-0.42/   # Spanish model (244MB, downloaded)
+├── alternative.md              # Speech recognition alternatives analysis
+└── vosk-model-small-es-0.42/   # Spanish model for wake word (244MB, downloaded)
 ```
 
 ## User Experience Goals
@@ -339,7 +362,11 @@ tidal-voice-assistant/
 
 - **Vosk Models**: https://alphacephei.com/vosk/models
   - Using: `vosk-model-small-es-0.42` (244MB, low memory usage)
-  - Used for both wake word detection and command recognition
+  - Used for wake word detection only
+
+- **SpeechRecognition**: https://github.com/Uberi/speech_recognition
+  - Google Speech API wrapper (free tier, no API key needed)
+  - Used for accurate command recognition
 
 - **Pychromecast**: https://github.com/home-assistant-libs/pychromecast
   - Google Cast protocol implementation

@@ -67,8 +67,14 @@ WAKE_WORDS = [
 ]
 
 # Speech Recognition Configuration
-VOSK_MODEL_PATH = "vosk-model-small-es-0.42"  # Small Spanish model (244MB, lower memory)
+VOSK_MODEL_PATH = "vosk-model-small-es-0.42"  # Small Spanish model for wake word detection
 SPEECH_TIMEOUT = 8  # Seconds to listen for command after wake word
+
+# Command Recognition Configuration (Hybrid Architecture)
+# Wake word detection: Vosk (local, fast, offline)
+# Command recognition: Google Speech API (cloud, accurate, free)
+COMMAND_RECOGNITION = 'google'  # Options: 'google', 'vosk' (fallback)
+COMMAND_LANGUAGE = 'es-ES'  # Spanish (Spain) for Google Speech API
 
 # Audio Configuration
 SAMPLE_RATE = 44100

@@ -1,8 +1,12 @@
 """
 Centralized audio processing for voice assistant.
 
-Uses a single full-model recognizer that detects wake words in the transcription,
-allowing users to say wake word + command together naturally.
+Hybrid Architecture:
+- Wake word detection: Vosk (local, fast, offline)
+- Command recognition: Google Speech API (cloud, accurate, free)
+
+This allows users to say wake word + command together naturally,
+with high accuracy for artist names, song titles, and commands.
 """
 
 import pyaudio
@@ -17,19 +21,36 @@ from config import (
     WAKE_WORDS,
     SPEECH_TIMEOUT,
     AUDIO_INPUT_DEVICE_INDEX,
+    COMMAND_RECOGNITION,
     setup_logging
 )
 from pathlib import Path
 
 logger = setup_logging(__name__)
 
+# Import cloud recognizer if enabled
+if COMMAND_RECOGNITION == 'google':
+    try:
+        from cloud_recognizer import CloudRecognizer
+        CLOUD_AVAILABLE = True
+        logger.info("Cloud speech recognition enabled (Google)")
+    except ImportError as e:
+        logger.warning(f"Cloud recognizer not available: {e}. Falling back to Vosk.")
+        CLOUD_AVAILABLE = False
+else:
+    CLOUD_AVAILABLE = False
+    logger.info("Using Vosk for command recognition (cloud disabled)")
+
 class AudioProcessor:
     """
     Handles all audio input, state management, and speech recognition.
 
-    Uses a single full-model recognizer that detects wake words in transcriptions.
+    Hybrid Architecture:
+    - Vosk: Wake word detection (local, fast, always listening)
+    - Google Speech API: Command recognition (cloud, accurate, after wake word)
+
     This allows users to say "okay musica reproduce bohemian rhapsody" naturally
-    without needing to pause between wake word and command.
+    with high accuracy for artist names and song titles.
     """
 
     STATE_LISTENING_WAKE_WORD = "LISTENING_WAKE_WORD"
@@ -55,7 +76,16 @@ class AudioProcessor:
         self._last_command_partial = ""
         self._wake_word_pending = False
 
-        # Vosk Model
+        # Audio buffer for cloud recognition
+        self._audio_buffer = []
+
+        # Cloud recognizer for commands (if enabled)
+        self.cloud_recognizer = None
+        if CLOUD_AVAILABLE:
+            self.cloud_recognizer = CloudRecognizer()
+            logger.info("Cloud recognizer initialized for command recognition")
+
+        # Vosk Model (used for wake word detection, fallback for commands)
         model_path = VOSK_MODEL_PATH
         model_dir = Path(model_path)
         if not model_dir.exists():
@@ -68,8 +98,8 @@ class AudioProcessor:
         self.wake_phrases = [phrase.lower().strip() for phrase in WAKE_WORDS]
         logger.info(f"Wake phrases: {self.wake_phrases}")
 
-        # Single recognizer for both wake word detection and commands
-        # Using full model (not grammar-restricted) to capture wake word + command together
+        # Vosk recognizer for wake word detection
+        # Also used as fallback for commands if cloud is unavailable
         self.recognizer = KaldiRecognizer(self.model, SAMPLE_RATE)
         self.recognizer.SetMaxAlternatives(5)
 
@@ -224,45 +254,107 @@ class AudioProcessor:
         return alternatives
 
     def _process_command(self, data):
-        """Process audio while listening for command after wake word."""
+        """
+        Process audio while listening for command after wake word.
+
+        Hybrid mode:
+        - Collects audio into buffer for cloud recognition
+        - Uses Vosk to detect speech end (AcceptWaveform)
+        - Sends buffered audio to Google for accurate transcription
+        - Falls back to Vosk if cloud recognition fails
+        """
+        # Always buffer audio for cloud recognition
+        self._audio_buffer.append(data)
+
         # Check for timeout first
         elapsed = time.time() - self._command_listen_start_time
         if elapsed > SPEECH_TIMEOUT:
             logger.warning(f"Command listening timed out after {elapsed:.1f}s")
-
-            # Use last known partial if final result is empty
-            final_result = self.recognizer.FinalResult()
-            result = json.loads(final_result)
-            if not result.get('text', '').strip() and self._last_command_partial:
-                logger.info(f"Using last partial as command: '{self._last_command_partial}'")
-                self._handle_command_from_text(self._last_command_partial)
-            else:
-                self._handle_command_result(final_result)
-
+            self._finalize_command_recognition()
             self.on_timeout()
             self._reset_to_wake_word_state()
             return
 
+        # Use Vosk to detect end of speech (but not for transcription)
         if self.recognizer.AcceptWaveform(data):
-            result_json = self.recognizer.Result()
-            result = json.loads(result_json)
-            logger.debug(f"AcceptWaveform result: {result}")
-
-            # If final result is empty but we have a partial, use the partial
-            if not result.get('text', '').strip() and self._last_command_partial:
-                logger.info(f"Empty result, using last partial: '{self._last_command_partial}'")
-                self._handle_command_from_text(self._last_command_partial)
-            else:
-                self._handle_command_result(result_json)
+            logger.debug("Vosk detected end of speech")
+            self._finalize_command_recognition()
             self._reset_to_wake_word_state()
         else:
-            # Log partial results and save for fallback
+            # Log partial results for debugging (Vosk still processes for speech detection)
             partial_result_json = self.recognizer.PartialResult()
             partial_result = json.loads(partial_result_json)
             partial_text = partial_result.get("partial", "")
             if partial_text:
-                logger.info(f"Command partial: '{partial_text}'")
+                logger.debug(f"Vosk partial: '{partial_text}'")
                 self._last_command_partial = partial_text
+
+    def _finalize_command_recognition(self):
+        """
+        Finalize command recognition using cloud or Vosk fallback.
+
+        Called when speech ends (Vosk AcceptWaveform) or timeout.
+        """
+        alternatives = []
+
+        # Try cloud recognition first if available
+        if self.cloud_recognizer and self._audio_buffer:
+            logger.info("Sending audio to Google Speech API...")
+            audio_bytes = b''.join(self._audio_buffer)
+
+            try:
+                alternatives = self.cloud_recognizer.recognize_from_audio_data(
+                    audio_bytes,
+                    sample_rate=SAMPLE_RATE,
+                    sample_width=2  # 16-bit audio
+                )
+            except Exception as e:
+                logger.error(f"Cloud recognition failed: {e}")
+                alternatives = []
+
+        # Fall back to Vosk if cloud failed or unavailable
+        if not alternatives:
+            logger.info("Using Vosk fallback for command recognition")
+            final_result = self.recognizer.FinalResult()
+            result = json.loads(final_result)
+
+            main_text = result.get('text', '').strip()
+            if main_text:
+                alternatives = [main_text]
+                # Add Vosk alternatives
+                for alt in result.get('alternatives', []):
+                    alt_text = alt.get('text', '').strip()
+                    if alt_text and alt_text not in alternatives:
+                        alternatives.append(alt_text)
+            elif self._last_command_partial:
+                logger.info(f"Using last partial: '{self._last_command_partial}'")
+                alternatives = [self._last_command_partial]
+
+        # Clean up any wake word remnants from alternatives
+        cleaned = []
+        for alt in alternatives:
+            matched, end_idx = self._is_wake_word_match(alt)
+            if matched:
+                cmd = alt[end_idx:].strip()
+                if cmd:
+                    cleaned.append(cmd)
+            else:
+                cleaned.append(alt)
+
+        # Remove duplicates while preserving order
+        seen = set()
+        unique_alternatives = []
+        for alt in cleaned:
+            if alt and alt.lower() not in seen:
+                seen.add(alt.lower())
+                unique_alternatives.append(alt)
+
+        if unique_alternatives:
+            logger.info(f"Command alternatives: {unique_alternatives}")
+        else:
+            logger.warning("No command recognized")
+
+        self.on_command(unique_alternatives)
 
     def _handle_command_from_text(self, text):
         """Handle command from raw text (e.g., from partial result)."""
@@ -317,6 +409,7 @@ class AudioProcessor:
         self.recognizer.Reset()
         self._wake_word_pending = False
         self._last_command_partial = ""
+        self._audio_buffer = []  # Clear audio buffer
         self.state = self.STATE_LISTENING_WAKE_WORD
         logger.info(f"State changed back to: {self.state}")
 

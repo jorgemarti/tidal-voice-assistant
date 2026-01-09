@@ -1,5 +1,8 @@
-# Speech recognition (offline) - also used for wake word detection
+# Speech recognition - Hybrid Architecture
+# Vosk: Wake word detection (local, offline)
 vosk==0.3.45
+# SpeechRecognition: Google Speech API for commands (cloud, accurate, free)
+SpeechRecognition>=3.10.0
 
 # Audio capture
 pyaudio==0.2.14
