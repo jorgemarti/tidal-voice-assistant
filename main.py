@@ -24,7 +24,8 @@ def print_banner():
 
 def on_wake_word_detected():
     """Callback executed when wake word is detected."""
-    tidal_player.play_activation_sound()
+    # Prompt user for command - recording starts after TTS completes
+    tidal_player.speak("¿Qué quieres escuchar?", wait=True)
 
 def on_command_timeout():
     """Callback executed when command listening times out."""
