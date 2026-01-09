@@ -199,14 +199,18 @@ COMMAND_LANGUAGE = 'es-ES'      # Spanish (Spain) for Google Speech API
 
 Autoplay can be disabled by setting `AUTOPLAY_ENABLED = False` in `config.py`.
 
-### Playback Control Flow
-1. **User says**: "Hey Tidal, pausa"
-2. **Wake word detected**: Vosk detects trigger phrase
-3. **Speech captured**: Audio recorded
-4. **Transcribed**: Text "pausa" recognized
-5. **Parsed**: Command parser identifies 'pause' action
-6. **Executed**: Pause command sent to Chromecast
-7. **Result**: Music playback paused
+### Playback Control Flow (Context-Aware)
+When music is playing, the system is context-aware:
+
+1. **User says**: "Okey música"
+2. **Wake word detected**: Vosk detects trigger phrase locally
+3. **Music paused**: System pauses playback so mic doesn't pick up music
+4. **Short prompt**: Nest Mini says "¿Sí?" (shorter than initial "¿Qué quieres escuchar?")
+5. **Command captured**: Audio recorded without music interference
+6. **Cloud transcription**: Google Speech API transcribes accurately
+7. **Parsed**: Command parser identifies action (stop/skip/pause/resume/new search)
+8. **Executed**: Action performed
+9. **Smart resume**: If command not understood or timeout, music resumes automatically
 
 For non-music commands, user continues using:
 - "Ok Google, ¿qué tiempo hace?"
