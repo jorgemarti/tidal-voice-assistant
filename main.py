@@ -61,6 +61,7 @@ def on_command_received(alternatives):
     # Handle playback control commands
     action = parsed['action']
     if action == 'stop':
+        tidal_player.speak("Parando la música.")
         tidal_player.stop()
     elif action == 'pause':
         tidal_player.pause()
@@ -73,6 +74,15 @@ def on_command_received(alternatives):
         search_type = command_parser.get_search_type(action)
         query = parsed.get('query')
         if query:
+            # Announce what we're going to play
+            search_type_spanish = {
+                'track': 'la canción',
+                'artist': 'música de',
+                'album': 'el álbum',
+                'playlist': 'la playlist'
+            }.get(search_type, '')
+            tidal_player.speak(f"Buscando {search_type_spanish} {query}.")
+
             success = tidal_player.phonetic_search_and_play(query, search_type)
             if not success:
                 logger.error(f"Failed to play '{query}'")

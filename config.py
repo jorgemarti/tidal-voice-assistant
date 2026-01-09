@@ -67,8 +67,8 @@ WAKE_WORDS = [
 ]
 
 # Speech Recognition Configuration
-VOSK_MODEL_PATH = "vosk-model-es"  # Spanish model directory
-SPEECH_TIMEOUT = 5  # Seconds to listen for command after wake word
+VOSK_MODEL_PATH = "vosk-model-es-0.42"  # Large Spanish model (1.4GB, better accuracy)
+SPEECH_TIMEOUT = 8  # Seconds to listen for command after wake word
 
 # Audio Configuration
 SAMPLE_RATE = 44100

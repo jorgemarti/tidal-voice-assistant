@@ -42,8 +42,9 @@ Jorge has a Google Nest Mini (2nd gen) that he uses for:
 
 ### Language Requirements
 - All speech recognition must use **Spanish from Spain** (es-ES)
-- Wake phrases: "Hey Tidal" or "Oye Tidal" (fully offline detection)
+- Wake phrases: "Okay música" or "Okey música" (fully offline detection)
 - Command parsing must understand Spanish music commands
+- Voice feedback in Spanish when commands are understood
 
 ## Architecture
 
@@ -52,23 +53,26 @@ Jorge has a Google Nest Mini (2nd gen) that he uses for:
 For a detailed visual representation of the system architecture, see [architecture.svg](architecture.svg).
 
 **Component Flow:**
-- User → Microphone → Wake Word Detection (Vosk) → Speech Recognition (Vosk)
-- Speech Recognition → Command Parser → Tidal Player
+- User → Microphone → AudioProcessor (single Vosk recognizer)
+- AudioProcessor detects wake word in transcription, extracts command
+- Command Parser → Phonetic Matcher → Tidal Player
 - Tidal Player ↔ Tidal API (search, stream URLs)
 - Tidal Player → Pychromecast → Google Nest Mini (audio playback)
 
 ## Key Components
 
-### 1. Wake Word Detection (`wake_word.py`)
-- Uses Vosk for wake word detection (fully offline)
-- Default wake phrases: "Hey Tidal", "Oye Tidal"
-- No external API dependencies
-- Note: Picovoice was evaluated but not used to reduce external dependencies and failure points
+### 1. Audio Processor (`audio_processor.py`)
+- Centralized audio processing with single Vosk recognizer
+- Uses full model (not grammar-restricted) to capture wake word + command together
+- Default wake phrases: "Okay música", "Okey música"
+- Flexible regex matching for wake word variations
+- Falls back to partial results when final result is empty
+- 8-second timeout for command listening
 
-### 2. Speech Recognition (`speech_recognition.py`)
-- Vosk model: `vosk-model-small-es-0.42` (Spanish from Spain)
-- Offline recognition (no cloud dependency)
-- Captures audio for 5 seconds after wake word
+### 2. Phonetic Matcher (`phonetic_matcher.py`)
+- Uses g2p-en for grapheme-to-phoneme conversion
+- Fuzzy matching with fuzzywuzzy for Tidal search results
+- Helps match misrecognized artist/song names to actual Tidal results
 
 ### 3. Command Parser (`command_parser.py`)
 - Parses Spanish music commands:
@@ -285,18 +289,19 @@ gtts                # Text-to-speech (testing only)
 tidal-voice-assistant/
 ├── main.py                      # Entry point
 ├── config.py                    # Configuration
-├── tidal_auth.py               # Tidal authentication
-├── wake_word.py                # Wake word detection
-├── speech_recognition.py       # Spanish STT
+├── audio_processor.py          # Centralized audio processing (wake word + commands)
 ├── command_parser.py           # Parse Spanish commands
+├── phonetic_matcher.py         # Phonetic matching for fuzzy search
 ├── tidal_player.py             # Tidal + Chromecast
+├── tidal_auth.py               # Tidal authentication
+├── list_audio_devices.py       # List available audio devices
 ├── test_chromecast.py          # Chromecast testing
 ├── test_tidal.py               # Tidal testing
 ├── test_wake_word.py           # Wake word testing and troubleshooting
 ├── requirements.txt            # Python deps
 ├── .env.example                # Environment template
 ├── tidal-assistant.service     # Systemd service
-└── vosk-model-es/              # Spanish model (downloaded)
+└── vosk-model-es-0.42/         # Large Spanish model (1.4GB, downloaded)
 ```
 
 ## User Experience Goals
@@ -333,8 +338,7 @@ tidal-voice-assistant/
 ## Resources & References
 
 - **Vosk Models**: https://alphacephei.com/vosk/models
-  - Spanish: `vosk-model-small-es-0.42` (244MB)
-  - Larger model: `vosk-model-es-0.42` (1.4GB, better accuracy)
+  - Using: `vosk-model-es-0.42` (1.4GB, better accuracy)
   - Used for both wake word detection and command recognition
 
 - **Pychromecast**: https://github.com/home-assistant-libs/pychromecast
@@ -372,9 +376,9 @@ python3 -m venv venv
 source venv/bin/activate
 pip install -r requirements.txt
 
-# Download Spanish model
-wget https://alphacephei.com/vosk/models/vosk-model-small-es-0.42.zip
-unzip vosk-model-small-es-0.42.zip
+# Download large Spanish model (1.4GB)
+wget https://alphacephei.com/vosk/models/vosk-model-es-0.42.zip
+unzip vosk-model-es-0.42.zip
 
 # Test Chromecast
 python test_chromecast.py --discover

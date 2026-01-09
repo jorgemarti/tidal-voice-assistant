@@ -52,10 +52,10 @@ def test_basic_wake_word():
         print("🎤 Listening for wake word... (Press Ctrl+C to stop)")
         while True:
             data = audio_processor.stream.read(CHUNK_SIZE, exception_on_overflow=False)
-            if audio_processor.wake_word_recognizer.AcceptWaveform(data):
-                result = json.loads(audio_processor.wake_word_recognizer.Result())
+            if audio_processor.recognizer.AcceptWaveform(data):
+                result = json.loads(audio_processor.recognizer.Result())
                 text = result.get('text', '').strip()
-                if text and any(phrase in text for phrase in audio_processor.wake_phrases):
+                if text and any(phrase in text.lower() for phrase in audio_processor.wake_phrases):
                     on_wake_word_callback()
     except KeyboardInterrupt:
         pass
@@ -151,6 +151,8 @@ def test_microphone():
     print("Press Ctrl+C to stop")
     print()
 
+    p = pyaudio.PyAudio()
+    stream = None
     try:
         stream = p.open(
             format=pyaudio.paInt16,
@@ -190,9 +192,11 @@ def test_microphone():
         print(f"\n❌ Error: {e}")
         return False
     finally:
-        stream.stop_stream()
-        stream.close()
-        p.terminate()
+        if stream and stream.is_active():
+            stream.stop_stream()
+            stream.close()
+        if p:
+            p.terminate()
 
     return True
 

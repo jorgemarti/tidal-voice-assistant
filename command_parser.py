@@ -69,10 +69,10 @@ class MusicCommandParser:
     def parse(self, text):
         """
         Parse voice command text into structured action.
-        
+
         Args:
             text: Recognized speech text in Spanish
-            
+
         Returns:
             dict with 'action' and 'query' keys, or None if no match
             {
@@ -82,8 +82,18 @@ class MusicCommandParser:
         """
         if not text:
             return None
-        
+
         text = text.lower().strip()
+
+        # Fix common misrecognitions of "reproduce/reproducir"
+        misrecognitions = [
+            'reconocido', 'reconoce', 'reproduce el', 'reproductor',
+            'reproducido', 'reproduciendo', 'reproducir el'
+        ]
+        for mis in misrecognitions:
+            if text.startswith(mis):
+                text = 'reproduce' + text[len(mis):]
+                break
         
         # Try each pattern type in order
         for action, patterns in self.patterns.items():

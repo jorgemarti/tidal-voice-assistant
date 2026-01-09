@@ -11,15 +11,15 @@ This project creates a voice-controlled Tidal music player using a Raspberry Pi 
 ![Tidal Voice Assistant Architecture](architecture.svg)
 
 **Flow**:
-1. Say wake phrase: "Hey Tidal" or "Oye Tidal"
-2. Speak music command in Spanish: "Reproduce Bohemian Rhapsody"
+1. Say wake phrase: "Okay música" (or "Okey música")
+2. Speak music command in Spanish: "Reproduce Rosalía" (can be in same breath or after beep)
 3. Pi transcribes speech to text (Spanish model)
-4. Parses command to extract song/artist
+4. Parses command to extract song/artist using phonetic matching
 5. Searches Tidal API
-6. Streams audio URL to Nest Mini via Chromecast protocol
+6. Announces what will be played, then streams audio to Nest Mini via Chromecast
 7. For non-music commands, continue using "Ok Google" directly on Nest Mini
 
-**Note**: Wake word detection uses Vosk (fully offline). Picovoice was evaluated but not used to reduce external dependencies.
+**Note**: Wake word detection uses Vosk with a single full-model recognizer (fully offline). This allows saying wake word + command together naturally.
 
 ## 📋 Hardware Requirements
 
@@ -61,12 +61,13 @@ pip install -r requirements.txt
 ### Step 2: Download Spanish Speech Recognition Model
 
 ```bash
-# Download Vosk Spanish model (Spain variant)
-wget https://alphacephei.com/vosk/models/vosk-model-small-es-0.42.zip
-unzip vosk-model-small-es-0.42.zip
-mv vosk-model-small-es-0.42 vosk-model-es
-rm vosk-model-small-es-0.42.zip
+# Download large Vosk Spanish model (1.4GB, better accuracy)
+wget https://alphacephei.com/vosk/models/vosk-model-es-0.42.zip
+unzip vosk-model-es-0.42.zip
+rm vosk-model-es-0.42.zip
 ```
+
+**Note**: The large model provides significantly better recognition accuracy than the small model.
 
 ### Step 3: Configure Environment Variables (Optional)
 
@@ -111,7 +112,7 @@ python test_wake_word.py --debug
 python test_wake_word.py --mic
 ```
 
-Say "Hey Tidal" or "Oye Tidal" to test detection.
+Say "Okay música" to test detection.
 
 ### Step 6: Find Your Nest Mini Name
 
@@ -242,17 +243,19 @@ Ready! Say 'Hey Tidal' or 'Oye Tidal' followed by your music command
 ### Example Commands (in Spanish):
 
 **Music playback:**
-- **"Hey Tidal, reproduce Bohemian Rhapsody"** → Play song
-- **"Oye Tidal, pon música de Queen"** → Play artist's top tracks
-- **"Hey Tidal, reproduce el álbum A Night at the Opera"** → Play album
-- **"Oye Tidal, pon canciones de Metallica"** → Play artist
-- **"Hey Tidal, reproduce la playlist rock clásico"** → Play playlist
+- **"Okay música, reproduce Rosalía"** → Play song
+- **"Okay música, pon música de Bad Bunny"** → Play artist's top tracks
+- **"Okay música, reproduce el álbum El Madrileño"** → Play album
+- **"Okay música, pon canciones de Metallica"** → Play artist
+- **"Okay música, reproduce la playlist rock clásico"** → Play playlist
 
 **Playback controls:**
-- **"Hey Tidal, para"** or **"stop"** → Stop playback
-- **"Oye Tidal, pausa"** → Pause playback
-- **"Hey Tidal, continúa"** or **"sigue"** → Resume playback
-- **"Oye Tidal, siguiente"** or **"salta"** → Skip to next track
+- **"Okay música, para"** or **"stop"** → Stop playback
+- **"Okay música, pausa"** → Pause playback
+- **"Okay música, continúa"** or **"sigue"** → Resume playback
+- **"Okay música, siguiente"** or **"salta"** → Skip to next track
+
+**Tip**: Spanish artist/song names work best. English names may be misrecognized.
 
 ### Non-Music Commands (use Nest Mini directly):
 
@@ -299,20 +302,22 @@ Tidal tokens auto-refresh, but the refresh token expires (~30 days). When this h
 tidal-voice-assistant/
 ├── README.md                    # This file
 ├── CLAUDE.md                    # Context for Claude Code
+├── architecture.svg             # Architecture diagram
 ├── requirements.txt             # Python dependencies
 ├── .env.example                 # Environment variables template
 ├── config.py                    # Application configuration
 ├── main.py                      # Main application entry point
-├── tidal_auth.py               # Tidal authentication
-├── wake_word.py                # Wake word detection
-├── speech_recognition.py       # Spanish speech-to-text
+├── audio_processor.py          # Centralized audio processing (wake word + commands)
 ├── command_parser.py           # Parse Spanish music commands
+├── phonetic_matcher.py         # Phonetic matching for fuzzy search
 ├── tidal_player.py             # Tidal API and Chromecast integration
+├── tidal_auth.py               # Tidal authentication
+├── list_audio_devices.py       # List available audio input devices
 ├── test_chromecast.py          # Chromecast testing utilities
 ├── test_tidal.py               # Tidal integration testing
 ├── test_wake_word.py           # Wake word detection testing
 ├── tidal-assistant.service     # Systemd service file
-└── vosk-model-es/              # Spanish speech recognition model (downloaded)
+└── vosk-model-es-0.42/         # Large Spanish speech recognition model (downloaded)
 ```
 
 ## 🐛 Troubleshooting
@@ -320,14 +325,15 @@ tidal-voice-assistant/
 ### Wake Word Not Detected
 - Test wake word detection: `python test_wake_word.py --debug`
 - Check microphone levels: `python test_wake_word.py --mic`
+- List audio devices: `python list_audio_devices.py`
 - Verify microphone input: `arecord -l`
 - Increase microphone volume: `alsamixer`
-- Speak clearly: "Hey Tidal" or "Oye Tidal"
-- Allow 1-2 seconds for detection
+- Speak clearly: "Okay música"
+- Pause briefly after the wake word if saying command separately
 
 ### Speech Recognition Not Working
-- Verify Spanish model is downloaded to `vosk-model-es/`
-- Test speech recognition: `python speech_recognition.py`
+- Verify Spanish model is downloaded to `vosk-model-es-0.42/`
+- Test with: `python main.py` and check partial transcriptions in logs
 - Test wake word detection: `python test_wake_word.py --debug`
 
 ### Chromecast Not Found
