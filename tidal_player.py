@@ -7,6 +7,7 @@ from tidal_auth import load_tidal_session
 import pychromecast
 import time
 import threading
+import random
 from phonetic_matcher import PhoneticMatcher
 from config import (
     CHROMECAST_NAME, TIDAL_CONFIG, setup_logging,
@@ -249,7 +250,7 @@ class TidalPlayer:
     
     def play_artist_top_tracks(self, artist, limit=20):
         """
-        Play top tracks from an artist with continuous playback.
+        Play top tracks from an artist with continuous playback (randomized order).
 
         Args:
             artist: Tidal artist object
@@ -266,7 +267,15 @@ class TidalPlayer:
                 logger.warning("No tracks found for artist")
                 return False
 
-            logger.info(f"Queueing {len(top_tracks)} tracks from {artist.name}")
+            # Randomize track order
+            top_tracks = list(top_tracks)
+            random.shuffle(top_tracks)
+
+            logger.info(f"Queueing {len(top_tracks)} shuffled tracks from {artist.name}")
+
+            # Announce the first track
+            first_track = top_tracks[0]
+            self.speak(f"Reproduciendo {first_track.name} de {artist.name}.")
 
             # Play first track, queue the rest
             for i, track in enumerate(top_tracks):
@@ -415,6 +424,9 @@ class TidalPlayer:
         if not self.cast_device and not self.find_chromecast():
             return False
 
+        # Clear any existing queue before starting new playback
+        self.clear_queue()
+
         # 1. Broad search on Tidal to get candidates
         # We get more results (limit=10) to have a good pool for phonetic matching
         results = self.search_tidal(query, search_type, limit=10)
@@ -442,16 +454,18 @@ class TidalPlayer:
 
         logger.info(f"Phonetic match selected: '{best_match_object.name}'")
 
-        # 3. Play the best-matched item
+        # 3. Announce and play the best-matched item
         if search_type == 'track':
+            self.speak(f"Reproduciendo {best_match_object.name} de {best_match_object.artist.name}.")
             return self.play_track_with_autoplay(best_match_object)
         elif search_type == 'artist':
+            # Announcement happens inside play_artist_top_tracks after selecting first track
             return self.play_artist_top_tracks(best_match_object)
         elif search_type == 'album':
+            self.speak(f"Reproduciendo el álbum {best_match_object.name} de {best_match_object.artist.name}.")
             return self.play_album(best_match_object)
         elif search_type == 'playlist':
-            # Playlists often have very specific names, phonetic search might not
-            # be as useful, but we can still use it.
+            self.speak(f"Reproduciendo la playlist {best_match_object.name}.")
             return self.play_playlist(best_match_object)
 
         return False
@@ -470,6 +484,9 @@ class TidalPlayer:
         # Ensure Chromecast is connected
         if not self.cast_device and not self.find_chromecast():
             return False
+
+        # Clear any existing queue before starting new playback
+        self.clear_queue()
 
         # Search Tidal
         results = self.search_tidal(query, search_type)
@@ -507,14 +524,56 @@ class TidalPlayer:
             import urllib.parse
             tts_url = f"https://translate.google.com/translate_tts?ie=UTF-8&client=tw-ob&tl={lang}&q={urllib.parse.quote(message)}"
 
-            self.media_controller.play_media(tts_url, 'audio/mp3')
-            self.media_controller.block_until_active()
             logger.info(f"Speaking: {message}")
+            self.media_controller.play_media(tts_url, 'audio/mp3')
+
+            # Wait for media to start
+            try:
+                self.media_controller.block_until_active(timeout=5)
+            except Exception as e:
+                logger.warning(f"block_until_active failed: {e}")
 
             if wait:
-                # Estimate speech duration: ~80ms per character + 500ms buffer
-                wait_time = len(message) * 0.08 + 0.5
-                time.sleep(wait_time)
+                # First, wait for playback to actually START
+                max_start_wait = 3
+                started = False
+                for _ in range(int(max_start_wait / 0.2)):
+                    time.sleep(0.2)
+                    self.media_controller.update_status()
+                    status = self.media_controller.status
+                    if status and status.player_state == 'PLAYING':
+                        started = True
+                        logger.debug("TTS playback started")
+                        break
+
+                if not started:
+                    # Fallback: estimate duration based on text length
+                    wait_time = max(2.0, len(message) * 0.08 + 1.0)
+                    logger.debug(f"TTS status unknown, waiting {wait_time:.1f}s")
+                    time.sleep(wait_time)
+                else:
+                    # Poll until media stops playing
+                    max_wait = 15
+                    waited = 0
+                    poll_interval = 0.25
+
+                    while waited < max_wait:
+                        time.sleep(poll_interval)
+                        waited += poll_interval
+
+                        self.media_controller.update_status()
+                        status = self.media_controller.status
+
+                        if status is None:
+                            break
+
+                        # Check if playback finished
+                        if status.player_state in ('IDLE', 'UNKNOWN'):
+                            logger.debug(f"TTS finished (state: {status.player_state})")
+                            break
+
+                # Buffer after completion
+                time.sleep(0.5)
 
             return True
         except Exception as e:
@@ -524,8 +583,29 @@ class TidalPlayer:
     def stop(self):
         """Stop playback and clear queue"""
         if self.media_controller:
-            self.media_controller.stop()
-            logger.info("Playback stopped and queue cleared")
+            try:
+                # Stop current playback
+                self.media_controller.stop()
+                # Give time for stop to take effect
+                time.sleep(0.3)
+                # Launch default media receiver to clear any queue
+                if self.cast_device:
+                    self.cast_device.quit_app()
+                    time.sleep(0.2)
+                logger.info("Playback stopped and queue cleared")
+            except Exception as e:
+                logger.error(f"Error stopping playback: {e}")
+
+    def clear_queue(self):
+        """Clear the playback queue without stopping current track"""
+        if self.cast_device:
+            try:
+                # Quit and reconnect to clear queue
+                self.cast_device.quit_app()
+                time.sleep(0.3)
+                logger.debug("Queue cleared")
+            except Exception as e:
+                logger.error(f"Error clearing queue: {e}")
 
     def pause(self):
         """Pause playback"""

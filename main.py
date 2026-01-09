@@ -61,8 +61,9 @@ def on_command_received(alternatives):
     # Handle playback control commands
     action = parsed['action']
     if action == 'stop':
-        tidal_player.speak("Parando la música.")
+        # Stop first, then confirm (so TTS can be heard)
         tidal_player.stop()
+        tidal_player.speak("Música parada.")
     elif action == 'pause':
         tidal_player.pause()
     elif action == 'resume':
@@ -70,19 +71,14 @@ def on_command_received(alternatives):
     elif action == 'skip':
         tidal_player.skip()
     else:
-        # It's a music search command, execute it
+        # It's a music search command
+        # Stop current playback first so TTS announcement can be heard
+        tidal_player.stop()
+
         search_type = command_parser.get_search_type(action)
         query = parsed.get('query')
         if query:
-            # Announce what we're going to play
-            search_type_spanish = {
-                'track': 'la canción',
-                'artist': 'música de',
-                'album': 'el álbum',
-                'playlist': 'la playlist'
-            }.get(search_type, '')
-            tidal_player.speak(f"Buscando {search_type_spanish} {query}.")
-
+            # TTS announcement happens inside phonetic_search_and_play after identifying the song
             success = tidal_player.phonetic_search_and_play(query, search_type)
             if not success:
                 logger.error(f"Failed to play '{query}'")
