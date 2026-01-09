@@ -4,6 +4,7 @@ Phonetic matching for fuzzy search of music titles.
 
 from g2p_en import G2p
 from fuzzywuzzy import fuzz
+import nltk
 from config import setup_logging
 
 logger = setup_logging(__name__)
@@ -15,7 +16,8 @@ class PhoneticMatcher:
     """
 
     def __init__(self):
-        """Initialize the phonetic converter."""
+        """Initialize the phonetic converter and ensure NLTK resources are available."""
+        self._ensure_nltk_resources()
         try:
             self.g2p = G2p()
             logger.info("Phonetic converter (g2p-en) initialized.")
@@ -23,6 +25,31 @@ class PhoneticMatcher:
             logger.error(f"Failed to initialize g2p-en: {e}")
             logger.error("Please make sure you have run: pip install -r requirements.txt")
             self.g2p = None
+
+    def _ensure_nltk_resources(self):
+        """
+        Check if required NLTK resources are downloaded, and if not, download them.
+        """
+        try:
+            # Check if the resource is available
+            nltk.data.find('taggers/averaged_perceptron_tagger_eng.zip')
+            logger.debug("NLTK resource 'averaged_perceptron_tagger_eng' found.")
+        except LookupError:
+            # If not, download it
+            logger.warning("NLTK resource 'averaged_perceptron_tagger_eng' not found.")
+            print("Downloading required NLTK model for phonetics...")
+            try:
+                nltk.download('averaged_perceptron_tagger', quiet=True)
+                print("...download complete.")
+                logger.info("NLTK resource downloaded successfully.")
+            except Exception as e:
+                logger.error(f"Failed to download NLTK resource: {e}")
+                print("\nERROR: Failed to download NLTK resource.")
+                print("Please check your internet connection and try again.")
+                print("You can also try downloading it manually in a Python shell:")
+                print(">>> import nltk")
+                print(">>> nltk.download('averaged_perceptron_tagger')")
+
 
     def _get_phonemes(self, text):
         """
