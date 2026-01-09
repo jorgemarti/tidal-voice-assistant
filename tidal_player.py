@@ -6,6 +6,7 @@ import tidalapi
 from tidal_auth import load_tidal_session
 import pychromecast
 import time
+import threading
 from phonetic_matcher import PhoneticMatcher
 from config import (
     CHROMECAST_NAME, TIDAL_CONFIG, setup_logging,
@@ -14,6 +15,9 @@ from config import (
 )
 
 logger = setup_logging(__name__)
+
+# URL for the activation sound
+ACTIVATION_SOUND_URL = "https://actions.google.com/sounds/v1/alarms/beep_short.ogg"
 
 class TidalPlayer:
     """
@@ -42,6 +46,30 @@ class TidalPlayer:
             raise RuntimeError("Failed to load Tidal session")
 
         logger.info("Tidal session loaded successfully")
+
+    def play_activation_sound(self):
+        """
+        Plays a short sound on the Chromecast to indicate the wake word was detected.
+        Runs in a separate thread to be non-blocking.
+        """
+        logger.info("Playing activation sound")
+        thread = threading.Thread(target=self._play_sound_async)
+        thread.daemon = True
+        thread.start()
+
+    def _play_sound_async(self):
+        """Helper method to play sound without blocking."""
+        try:
+            if not self.cast_device and not self.find_chromecast():
+                logger.error("Cannot play activation sound: Chromecast not found")
+                return
+
+            self.media_controller.play_media(ACTIVATION_SOUND_URL, 'audio/ogg')
+            # Don't block here, just fire and forget
+            logger.debug("Activation sound sent to Chromecast")
+
+        except Exception as e:
+            logger.error(f"Error playing activation sound: {e}")
     
     def find_chromecast(self, retry=True):
         """

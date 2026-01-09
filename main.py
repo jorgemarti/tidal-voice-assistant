@@ -55,8 +55,14 @@ def main():
         logger.info("Initializing components...")
 
         wake_detector = WakeWordDetector()
-        # Share the Vosk model to save RAM (~250MB)
-        speech_recognizer = SpeechRecognizer(model=wake_detector.get_model())
+        
+        # Share the Vosk model and, crucially, the audio stream to prevent conflicts
+        speech_recognizer = SpeechRecognizer(
+            model=wake_detector.get_model(),
+            audio_instance=wake_detector.get_audio_instance(),
+            audio_stream=wake_detector.get_audio_stream()
+        )
+        
         command_parser = MusicCommandParser()
         tidal_player = TidalPlayer()
 
@@ -79,6 +85,9 @@ def main():
 
                 if not wake_detected:
                     continue
+                
+                # Play feedback sound to indicate the assistant is listening
+                tidal_player.play_activation_sound()
 
                 # Listen for command (now returns a list of alternatives)
                 command_alternatives = speech_recognizer.listen_for_command()
@@ -101,7 +110,8 @@ def main():
 
                 if not parsed:
                     logger.warning("Could not understand music command from any alternative")
-                    print("Try: 'reproduce [canción]' or 'pon música de [artista]'")
+                    # Let the user know we didn't understand
+                    tidal_player.speak("No entendí el comando.")
                     continue
 
                 logger.info(f"Parsed action: {parsed['action']}, query: '{parsed['query']}'")

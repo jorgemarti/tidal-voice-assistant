@@ -16,13 +16,15 @@ class SpeechRecognizer:
     Model: vosk-model-small-es-0.42 (Spanish from Spain)
     """
 
-    def __init__(self, model_path=None, model=None):
+    def __init__(self, model_path=None, model=None, audio_instance=None, audio_stream=None):
         """
         Initialize speech recognizer with Spanish model.
 
         Args:
             model_path: Path to Vosk model directory (default: from config)
             model: Optional pre-loaded Vosk Model instance to share
+            audio_instance: Optional shared PyAudio instance
+            audio_stream: Optional shared PyAudio stream
         """
         if model:
             # Use shared model instance
@@ -49,14 +51,21 @@ class SpeechRecognizer:
         self.recognizer = KaldiRecognizer(self.model, SAMPLE_RATE)
         self.recognizer.SetMaxAlternatives(5)
 
-        # Initialize PyAudio once and reuse
-        self.audio = pyaudio.PyAudio()
+        # Use shared audio resources if provided, otherwise create new ones
+        self.audio = audio_instance
+        self.stream = audio_stream
+        self._owns_audio = not (audio_instance and audio_stream)
 
-        logger.info("Spanish speech recognizer initialized")
+        if self._owns_audio:
+            logger.info("Creating new audio stream for speech recognition")
+            self.audio = pyaudio.PyAudio()
+        else:
+            logger.info("Using shared audio stream for speech recognition")
+
     
     def listen_for_command(self, timeout=None):
         """
-        Listen for voice command after wake word.
+        Listen for voice command after wake word using the shared audio stream.
 
         Args:
             timeout: Maximum seconds to listen (default: from config)
@@ -67,17 +76,16 @@ class SpeechRecognizer:
         """
         timeout = timeout or SPEECH_TIMEOUT
 
-        # Reset recognizer to ensure clean state for new command
-        self.recognizer.Reset()
-
-        stream = self.audio.open(
-            format=pyaudio.paInt16,
-            channels=1,
-            rate=SAMPLE_RATE,
-            input=True,
-            frames_per_buffer=CHUNK_SIZE
-        )
-        stream.start_stream()
+        # If this instance owns its own stream, it needs to manage it.
+        if self._owns_audio:
+            self.stream = self.audio.open(
+                format=pyaudio.paInt16,
+                channels=1,
+                rate=SAMPLE_RATE,
+                input=True,
+                frames_per_buffer=CHUNK_SIZE
+            )
+            self.stream.start_stream()
 
         logger.info(f"Listening for command (timeout: {timeout}s)...")
 
@@ -86,16 +94,13 @@ class SpeechRecognizer:
 
         try:
             while frames_read < max_frames:
-                data = stream.read(CHUNK_SIZE, exception_on_overflow=False)
+                data = self.stream.read(CHUNK_SIZE, exception_on_overflow=False)
                 frames_read += 1
 
                 if self.recognizer.AcceptWaveform(data):
                     result = json.loads(self.recognizer.Result())
-                    # Get all alternatives, starting with the main 'text'
                     main_text = result.get('text', '').strip()
                     if main_text:
-                        # The 'alternatives' list already contains the main text as the first result
-                        # with the highest confidence. We just need to extract the 'text' field.
                         alternatives = [alt['text'] for alt in result.get('alternatives', []) if alt.get('text')]
                         logger.info(f"Recognized alternatives: {alternatives}")
                         return alternatives
@@ -106,7 +111,6 @@ class SpeechRecognizer:
 
             if main_text:
                 alternatives = [alt['text'] for alt in result.get('alternatives', []) if alt.get('text')]
-                # Ensure the main text is first if it's not in the alternatives list for some reason
                 if main_text not in alternatives:
                     alternatives.insert(0, main_text)
                 logger.info(f"Recognized (partial) alternatives: {alternatives}")
@@ -119,8 +123,11 @@ class SpeechRecognizer:
             logger.error(f"Error during speech recognition: {e}")
             return []
         finally:
-            stream.stop_stream()
-            stream.close()
+            # Only close the stream if this instance owns it
+            if self._owns_audio and self.stream:
+                self.stream.stop_stream()
+                self.stream.close()
+                self.stream = None
     
     def listen_continuous(self, callback):
         """
@@ -130,6 +137,7 @@ class SpeechRecognizer:
         Args:
             callback: Function to call with recognized text
         """
+        # This method is for standalone testing, so it should manage its own stream
         stream = self.audio.open(
             format=pyaudio.paInt16,
             channels=1,
@@ -159,7 +167,8 @@ class SpeechRecognizer:
 
     def cleanup(self):
         """Clean up resources"""
-        if hasattr(self, 'audio') and self.audio:
+        # Only terminate audio if this instance owns it
+        if self._owns_audio and hasattr(self, 'audio') and self.audio:
             self.audio.terminate()
             self.audio = None
         logger.info("Speech recognizer cleaned up")

@@ -72,6 +72,18 @@ class WakeWordDetector:
         """
         return self.model
 
+    def get_audio_instance(self):
+        """
+        Get the PyAudio instance for sharing.
+        """
+        return self.audio
+
+    def get_audio_stream(self):
+        """
+        Get the audio stream for sharing.
+        """
+        return self.audio_stream
+
     def _contains_wake_phrase(self, text):
         """
         Check if text contains any of the wake phrases.
