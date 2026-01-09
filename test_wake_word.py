@@ -5,11 +5,11 @@ Test and troubleshoot wake word detection
 
 import argparse
 import sys
-from wake_word import WakeWordDetector
+from audio_processor import AudioProcessor
 from vosk import Model, KaldiRecognizer
 import pyaudio
 import json
-from config import VOSK_MODEL_PATH, SAMPLE_RATE, CHUNK_SIZE
+from config import VOSK_MODEL_PATH, SAMPLE_RATE, CHUNK_SIZE, AUDIO_INPUT_DEVICE_INDEX, WAKE_WORDS
 
 def test_basic_wake_word():
     """Test basic wake word detection"""
@@ -18,31 +18,53 @@ def test_basic_wake_word():
     print("=" * 60)
     print()
     print("This test will listen for wake words:")
-    print("  - 'Hey Tidal'")
-    print("  - 'Oye Tidal'")
+    for phrase in WAKE_WORDS:
+        print(f"  - '{phrase}'")
     print()
     print("Speak clearly and allow 1-2 seconds for detection")
     print("Press Ctrl+C to stop")
     print()
 
     count = 0
+    
+    def on_wake_word_callback():
+        nonlocal count
+        count += 1
+        print(f"✅ Wake word #{count} detected successfully!")
+        print("Waiting for next wake word...")
+        print()
+
+    def on_command_callback(alternatives):
+        pass # Not used in wake word test
+
+    def on_timeout_callback():
+        pass # Not used in wake word test
+
+    audio_processor = None
     try:
-        with WakeWordDetector() as detector:
-            while True:
-                detected = detector.listen()
-                if detected:
-                    count += 1
-                    print(f"✅ Wake word #{count} detected successfully!")
-                    print("Waiting for next wake word...")
-                    print()
-                elif detected is False:
-                    # Ctrl+C was pressed inside listen()
-                    break
+        audio_processor = AudioProcessor(
+            on_wake_word=on_wake_word_callback,
+            on_command=on_command_callback,
+            on_timeout=on_timeout_callback
+        )
+        audio_processor.stream.start_stream()
+
+        print("🎤 Listening for wake word... (Press Ctrl+C to stop)")
+        while True:
+            data = audio_processor.stream.read(CHUNK_SIZE, exception_on_overflow=False)
+            if audio_processor.wake_word_recognizer.AcceptWaveform(data):
+                result = json.loads(audio_processor.wake_word_recognizer.Result())
+                text = result.get('text', '').strip()
+                if text and any(phrase in text for phrase in audio_processor.wake_phrases):
+                    on_wake_word_callback()
     except KeyboardInterrupt:
         pass
     except Exception as e:
         print(f"\n❌ Error: {e}")
         return False
+    finally:
+        if audio_processor:
+            audio_processor.cleanup()
 
     print(f"\n\nTest completed. Total wake words detected: {count}")
     return True
@@ -69,16 +91,14 @@ def test_continuous_transcription():
 
     try:
         model = Model(VOSK_MODEL_PATH)
-        recognizer = KaldiRecognizer(model, SAMPLE_RATE)
-
-        p = pyaudio.PyAudio()
         stream = p.open(
             format=pyaudio.paInt16,
             channels=1,
             rate=SAMPLE_RATE,
             input=True,
-            frames_per_buffer=CHUNK_SIZE
-        )
+            frames_per_buffer=CHUNK_SIZE,
+            input_device_index=AUDIO_INPUT_DEVICE_INDEX
+
 
         print("🎤 Listening... (speak now)")
         print()
@@ -125,13 +145,13 @@ def test_microphone():
     print()
 
     try:
-        p = pyaudio.PyAudio()
         stream = p.open(
             format=pyaudio.paInt16,
             channels=1,
             rate=SAMPLE_RATE,
             input=True,
-            frames_per_buffer=CHUNK_SIZE
+            frames_per_buffer=CHUNK_SIZE,
+            input_device_index=AUDIO_INPUT_DEVICE_INDEX
         )
 
         print("🎤 Monitoring microphone... (speak now)")
