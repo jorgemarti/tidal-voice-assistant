@@ -127,7 +127,7 @@ class WakeWordDetector:
 
         except KeyboardInterrupt:
             logger.warning("Wake word detection interrupted")
-            return False
+            raise  # Re-raise the exception to allow graceful shutdown
 
     def cleanup(self):
         """Clean up resources"""
