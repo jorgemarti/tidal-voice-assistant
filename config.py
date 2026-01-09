@@ -74,6 +74,7 @@ SPEECH_TIMEOUT = 5  # Seconds to listen for command after wake word
 SAMPLE_RATE = 16000
 CHANNELS = 1
 CHUNK_SIZE = 8000
+AUDIO_INPUT_DEVICE_INDEX = 0  # Set to None to use default, or specify device ID from list_audio_devices.py
 
 # Note: Tidal authentication now uses OAuth device flow
 # No credentials needed in .env file

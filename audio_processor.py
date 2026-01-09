@@ -12,6 +12,7 @@ from config import (
     CHUNK_SIZE, 
     WAKE_WORDS, 
     SPEECH_TIMEOUT,
+    AUDIO_INPUT_DEVICE_INDEX, # Added this line
     setup_logging
 )
 from pathlib import Path
@@ -73,7 +74,8 @@ class AudioProcessor:
             channels=1,
             format=pyaudio.paInt16,
             input=True,
-            frames_per_buffer=CHUNK_SIZE
+            frames_per_buffer=CHUNK_SIZE,
+            input_device_index=AUDIO_INPUT_DEVICE_INDEX # Use the configured device index
         )
         logger.info("Audio stream opened.")
 
