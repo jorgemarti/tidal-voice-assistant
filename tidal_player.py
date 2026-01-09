@@ -625,6 +625,19 @@ class TidalPlayer:
             self.media_controller.queue_next()
             logger.info("Skipped to next track")
 
+    def is_playing(self):
+        """Check if music is currently playing or paused (active session)"""
+        if not self.media_controller:
+            return False
+        try:
+            self.media_controller.update_status()
+            status = self.media_controller.status
+            if status and status.player_state in ('PLAYING', 'PAUSED', 'BUFFERING'):
+                return True
+        except Exception as e:
+            logger.debug(f"Error checking playback status: {e}")
+        return False
+
 if __name__ == "__main__":
     """Test Tidal player"""
     import sys

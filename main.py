@@ -24,13 +24,21 @@ def print_banner():
 
 def on_wake_word_detected():
     """Callback executed when wake word is detected."""
-    # Prompt user for command - recording starts after TTS completes
-    tidal_player.speak("¿Qué quieres escuchar?", wait=True)
+    # Context-aware prompting:
+    # - If music is playing, pause first and use short prompt
+    # - If idle, use full prompt
+    if tidal_player.is_playing():
+        logger.info("Music is playing - pausing for command")
+        tidal_player.pause()
+        tidal_player.speak("¿Sí?", wait=True)
+    else:
+        tidal_player.speak("¿Qué quieres escuchar?", wait=True)
 
 def on_command_timeout():
     """Callback executed when command listening times out."""
     logger.warning("Command listening timed out.")
-    # You could have the assistant say "I'm still here" or similar
+    # Resume playback if it was paused for command listening
+    tidal_player.play()
     
 def on_command_received(alternatives):
     """
@@ -38,7 +46,8 @@ def on_command_received(alternatives):
     This contains the main application logic.
     """
     if not alternatives:
-        logger.warning("No command detected, listening for wake word again...")
+        logger.warning("No command detected, resuming playback...")
+        tidal_player.play()  # Resume if was paused
         return
 
     logger.info(f"Command alternatives received: {alternatives}")
@@ -54,7 +63,8 @@ def on_command_received(alternatives):
 
     if not parsed:
         logger.warning("Could not understand music command from any alternative.")
-        tidal_player.speak("No entendí el comando.")
+        tidal_player.speak("No entendí el comando.", wait=True)
+        tidal_player.play()  # Resume if was paused
         return
 
     logger.info(f"Parsed action: {parsed['action']}, query: '{parsed.get('query')}'")
@@ -71,6 +81,7 @@ def on_command_received(alternatives):
         tidal_player.play()
     elif action == 'skip':
         tidal_player.skip()
+        tidal_player.play()  # Resume after skipping (was paused for command)
     else:
         # It's a music search command
         # Stop current playback first so TTS announcement can be heard
