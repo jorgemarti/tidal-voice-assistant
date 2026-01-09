@@ -80,20 +80,27 @@ def main():
                 if not wake_detected:
                     continue
 
-                # Listen for command
-                command_text = speech_recognizer.listen_for_command()
+                # Listen for command (now returns a list of alternatives)
+                command_alternatives = speech_recognizer.listen_for_command()
 
-                if not command_text:
+                if not command_alternatives:
                     logger.warning("No command detected, listening for wake word again...")
                     continue
 
-                logger.info(f"Command received: '{command_text}'")
+                logger.info(f"Command alternatives received: {command_alternatives}")
 
-                # Parse command
-                parsed = command_parser.parse(command_text)
+                # Parse command by trying each alternative
+                parsed = None
+                for command_text in command_alternatives:
+                    parsed_attempt = command_parser.parse(command_text)
+                    if parsed_attempt:
+                        # Found a parsable command
+                        parsed = parsed_attempt
+                        logger.info(f"Using parsed command from: '{command_text}'")
+                        break  # Stop on the first valid command
 
                 if not parsed:
-                    logger.warning("Could not understand music command")
+                    logger.warning("Could not understand music command from any alternative")
                     print("Try: 'reproduce [canción]' or 'pon música de [artista]'")
                     continue
 

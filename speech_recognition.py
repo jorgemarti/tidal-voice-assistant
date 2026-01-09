@@ -47,6 +47,7 @@ class SpeechRecognizer:
             self._owns_model = True
 
         self.recognizer = KaldiRecognizer(self.model, SAMPLE_RATE)
+        self.recognizer.SetMaxAlternatives(5)
 
         # Initialize PyAudio once and reuse
         self.audio = pyaudio.PyAudio()
@@ -61,9 +62,13 @@ class SpeechRecognizer:
             timeout: Maximum seconds to listen (default: from config)
 
         Returns:
-            Recognized text string in Spanish
+            A list of recognized text alternatives, with the best one first.
+            Returns an empty list if no speech is detected.
         """
         timeout = timeout or SPEECH_TIMEOUT
+
+        # Reset recognizer to ensure clean state for new command
+        self.recognizer.Reset()
 
         stream = self.audio.open(
             format=pyaudio.paInt16,
@@ -86,26 +91,33 @@ class SpeechRecognizer:
 
                 if self.recognizer.AcceptWaveform(data):
                     result = json.loads(self.recognizer.Result())
-                    text = result.get('text', '').strip()
-
-                    if text:
-                        logger.info(f"Recognized: '{text}'")
-                        return text
+                    # Get all alternatives, starting with the main 'text'
+                    main_text = result.get('text', '').strip()
+                    if main_text:
+                        # The 'alternatives' list already contains the main text as the first result
+                        # with the highest confidence. We just need to extract the 'text' field.
+                        alternatives = [alt['text'] for alt in result.get('alternatives', []) if alt.get('text')]
+                        logger.info(f"Recognized alternatives: {alternatives}")
+                        return alternatives
 
             # Get partial result if timeout reached
             result = json.loads(self.recognizer.FinalResult())
-            text = result.get('text', '').strip()
+            main_text = result.get('text', '').strip()
 
-            if text:
-                logger.info(f"Recognized (partial): '{text}'")
+            if main_text:
+                alternatives = [alt['text'] for alt in result.get('alternatives', []) if alt.get('text')]
+                # Ensure the main text is first if it's not in the alternatives list for some reason
+                if main_text not in alternatives:
+                    alternatives.insert(0, main_text)
+                logger.info(f"Recognized (partial) alternatives: {alternatives}")
+                return alternatives
             else:
                 logger.warning("No speech detected")
-
-            return text
+                return []
 
         except Exception as e:
             logger.error(f"Error during speech recognition: {e}")
-            return ""
+            return []
         finally:
             stream.stop_stream()
             stream.close()
@@ -168,14 +180,18 @@ if __name__ == "__main__":
     
     try:
         recognizer = SpeechRecognizer()
-        text = recognizer.listen_for_command()
+        alternatives = recognizer.listen_for_command()
         
         print()
         print("=" * 60)
-        if text:
-            print(f"Final result: '{text}'")
+        if alternatives:
+            print(f"✅ Best guess: '{alternatives[0]}'")
+            if len(alternatives) > 1:
+                print("\nOther alternatives:")
+                for i, alt in enumerate(alternatives[1:], 1):
+                    print(f"  {i}. '{alt}'")
         else:
-            print("No speech recognized")
+            print("❌ No speech recognized")
         print("=" * 60)
         
     except FileNotFoundError as e:
