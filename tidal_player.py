@@ -14,7 +14,8 @@ from config import (
     CHROMECAST_NAME, TIDAL_CONFIG, setup_logging,
     RETRY_MAX_ATTEMPTS, RETRY_DELAY_SECONDS, RETRY_BACKOFF_MULTIPLIER,
     AUTOPLAY_ENABLED, AUTOPLAY_TRACK_COUNT,
-    SEARCH_CACHE_ENABLED, SEARCH_CACHE_TTL, SEARCH_CACHE_MAX_SIZE
+    SEARCH_CACHE_ENABLED, SEARCH_CACHE_TTL, SEARCH_CACHE_MAX_SIZE,
+    TTS_SHORT_ANNOUNCEMENTS
 )
 
 logger = setup_logging(__name__)
@@ -56,8 +57,16 @@ class SearchCache:
         self._cache[key] = (time.time(), results)
         logger.debug(f"Cached results for: {query}")
 
-# URL for the activation sound
-ACTIVATION_SOUND_URL = "https://actions.google.com/sounds/v1/alarms/beep_short.ogg"
+# Audio cue URLs (from Google Actions sound library)
+AUDIO_CUES = {
+    'wake': "https://actions.google.com/sounds/v1/alarms/beep_short.ogg",
+    'success': "https://actions.google.com/sounds/v1/cartoon/pop.ogg",
+    'error': "https://actions.google.com/sounds/v1/cartoon/clang_and_wobble.ogg",
+    'timeout': "https://actions.google.com/sounds/v1/cartoon/slide_whistle_to_drum.ogg",
+}
+
+# Backwards compatibility
+ACTIVATION_SOUND_URL = AUDIO_CUES['wake']
 
 class TidalPlayer:
     """
@@ -92,29 +101,42 @@ class TidalPlayer:
 
         logger.info("Tidal session loaded successfully")
 
+    def play_audio_cue(self, cue_type: str = 'wake'):
+        """
+        Play an audio cue on the Chromecast.
+
+        Args:
+            cue_type: Type of cue - 'wake', 'success', 'error', 'timeout'
+        """
+        if cue_type not in AUDIO_CUES:
+            logger.warning(f"Unknown audio cue type: {cue_type}")
+            cue_type = 'wake'
+
+        logger.debug(f"Playing audio cue: {cue_type}")
+        thread = threading.Thread(target=self._play_sound_async, args=(cue_type,))
+        thread.daemon = True
+        thread.start()
+
     def play_activation_sound(self):
         """
         Plays a short sound on the Chromecast to indicate the wake word was detected.
         Runs in a separate thread to be non-blocking.
         """
-        logger.debug("Playing activation sound")
-        thread = threading.Thread(target=self._play_sound_async)
-        thread.daemon = True
-        thread.start()
+        self.play_audio_cue('wake')
 
-    def _play_sound_async(self):
+    def _play_sound_async(self, cue_type: str = 'wake'):
         """Helper method to play sound without blocking."""
         try:
             if not self.cast_device and not self.find_chromecast():
-                logger.error("Cannot play activation sound: Chromecast not found")
+                logger.error("Cannot play audio cue: Chromecast not found")
                 return
 
-            self.media_controller.play_media(ACTIVATION_SOUND_URL, 'audio/ogg')
-            # Don't block here, just fire and forget
-            logger.debug("Activation sound sent to Chromecast")
+            sound_url = AUDIO_CUES.get(cue_type, AUDIO_CUES['wake'])
+            self.media_controller.play_media(sound_url, 'audio/ogg')
+            logger.debug(f"Audio cue '{cue_type}' sent to Chromecast")
 
         except Exception as e:
-            logger.error(f"Error playing activation sound: {e}")
+            logger.error(f"Error playing audio cue: {e}")
     
     def find_chromecast(self, retry=True):
         """
@@ -328,7 +350,7 @@ class TidalPlayer:
 
             # Announce the first track
             first_track = top_tracks[0]
-            self.speak(f"Reproduciendo {first_track.name} de {artist.name}.")
+            self._announce_track(first_track)
 
             # Play first track, queue the rest
             for i, track in enumerate(top_tracks):
@@ -509,16 +531,16 @@ class TidalPlayer:
 
         # 3. Announce and play the best-matched item
         if search_type == 'track':
-            self.speak(f"Reproduciendo {best_match_object.name} de {best_match_object.artist.name}.")
+            self._announce_track(best_match_object)
             return self.play_track_with_autoplay(best_match_object)
         elif search_type == 'artist':
             # Announcement happens inside play_artist_top_tracks after selecting first track
             return self.play_artist_top_tracks(best_match_object)
         elif search_type == 'album':
-            self.speak(f"Reproduciendo el álbum {best_match_object.name} de {best_match_object.artist.name}.")
+            self._announce_album(best_match_object)
             return self.play_album(best_match_object)
         elif search_type == 'playlist':
-            self.speak(f"Reproduciendo la playlist {best_match_object.name}.")
+            self._announce_playlist(best_match_object)
             return self.play_playlist(best_match_object)
 
         return False
@@ -559,6 +581,27 @@ class TidalPlayer:
             return self.play_playlist(results[0])
 
         return False
+
+    def _announce_track(self, track):
+        """Announce a track with optional short mode."""
+        if TTS_SHORT_ANNOUNCEMENTS:
+            self.speak(track.name)
+        else:
+            self.speak(f"Reproduciendo {track.name} de {track.artist.name}.")
+
+    def _announce_album(self, album):
+        """Announce an album with optional short mode."""
+        if TTS_SHORT_ANNOUNCEMENTS:
+            self.speak(album.name)
+        else:
+            self.speak(f"Reproduciendo el álbum {album.name} de {album.artist.name}.")
+
+    def _announce_playlist(self, playlist):
+        """Announce a playlist with optional short mode."""
+        if TTS_SHORT_ANNOUNCEMENTS:
+            self.speak(playlist.name)
+        else:
+            self.speak(f"Reproduciendo la playlist {playlist.name}.")
 
     def speak(self, message, lang='es', wait=True):
         """

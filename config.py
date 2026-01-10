@@ -61,11 +61,18 @@ CHROMECAST_NAME = "Altavoz Google"  # Your Nest Mini name
 CHROMECAST_PRECONNECT = True  # Connect to Chromecast on startup (reduces first-command latency)
 
 # Wake Word Configuration
+# Add your custom wake phrases here (Vosk uses unaccented text)
+# The system also uses a flexible regex pattern for variations
 WAKE_WORDS = [
     'okay musica',    # No accent - Vosk uses unaccented
     'okey musica',
     'okey musical',
 ]
+
+# Custom wake word regex pattern (optional)
+# Set to None to use default pattern: ok/okay/okey + musica/música/musical
+# Example: r'\b(hey|hola)\s*(tidal)\b' for "Hey Tidal" or "Hola Tidal"
+WAKE_WORD_PATTERN = None
 
 # Speech Recognition Configuration
 VOSK_MODEL_PATH = "vosk-model-small-es-0.42"  # Small Spanish model for wake word detection
@@ -91,6 +98,7 @@ VAD_AGGRESSIVENESS = 2  # 0-3, higher = more aggressive filtering (fewer false p
 TTS_ENGINE = 'local'  # Options: 'local' (pyttsx3, offline), 'google' (Google Translate TTS)
 TTS_LOCAL_RATE = 175  # Speech rate for local TTS (words per minute)
 TTS_LOCAL_VOICE = None  # None = system default, or specify voice name
+TTS_SHORT_ANNOUNCEMENTS = False  # If True, use brief announcements (just track name)
 
 # Search Cache Configuration
 SEARCH_CACHE_ENABLED = True  # Cache Tidal search results

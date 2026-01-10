@@ -37,6 +37,7 @@ def on_wake_word_detected():
 def on_command_timeout():
     """Callback executed when command listening times out."""
     logger.warning("Command listening timed out.")
+    tidal_player.play_audio_cue('timeout')
     # Resume playback if it was paused for command listening
     tidal_player.play()
     
@@ -63,6 +64,7 @@ def on_command_received(alternatives):
 
     if not parsed:
         logger.warning("Could not understand music command from any alternative.")
+        tidal_player.play_audio_cue('error')
         tidal_player.speak("No entendí el comando.", wait=True)
         tidal_player.play()  # Resume if was paused
         return

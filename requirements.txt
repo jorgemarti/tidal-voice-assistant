@@ -34,3 +34,6 @@ gtts==2.5.0
 
 # Local TTS (offline, faster than Google TTS)
 pyttsx3==2.90
+
+# Testing
+pytest>=7.0.0

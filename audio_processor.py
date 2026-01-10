@@ -21,6 +21,7 @@ from config import (
     SAMPLE_RATE,
     CHUNK_SIZE,
     WAKE_WORDS,
+    WAKE_WORD_PATTERN,
     SPEECH_TIMEOUT,
     AUDIO_INPUT_DEVICE_INDEX,
     COMMAND_RECOGNITION,
@@ -177,14 +178,19 @@ class AudioProcessor:
         Check if text contains a wake word using flexible matching.
         Handles variations like "ok/okay/okey" and "musica/música/musical".
 
+        Uses custom WAKE_WORD_PATTERN from config if set, otherwise uses default.
+
         Returns:
             tuple: (matched, end_index) - end_index is where command starts
         """
         text_lower = text.lower().strip()
 
-        # Flexible pattern: ok/okay/okey/okei/oque + musica/música/musical
-        # Handle variations from speech recognition
-        pattern = r'\b(o[kq](?:a?y|e[iy]|ue)?)\s*(m[uú]sica?l?)\b'
+        # Use custom pattern if configured, otherwise use default
+        if WAKE_WORD_PATTERN:
+            pattern = WAKE_WORD_PATTERN
+        else:
+            # Default: ok/okay/okey/okei/oque + musica/música/musical
+            pattern = r'\b(o[kq](?:a?y|e[iy]|ue)?)\s*(m[uú]sica?l?)\b'
         match = re.search(pattern, text_lower)
 
         if match:
