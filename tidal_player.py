@@ -9,13 +9,52 @@ import time
 import threading
 import random
 from phonetic_matcher import PhoneticMatcher
+from tts_engine import get_tts_engine
 from config import (
     CHROMECAST_NAME, TIDAL_CONFIG, setup_logging,
     RETRY_MAX_ATTEMPTS, RETRY_DELAY_SECONDS, RETRY_BACKOFF_MULTIPLIER,
-    AUTOPLAY_ENABLED, AUTOPLAY_TRACK_COUNT
+    AUTOPLAY_ENABLED, AUTOPLAY_TRACK_COUNT,
+    SEARCH_CACHE_ENABLED, SEARCH_CACHE_TTL, SEARCH_CACHE_MAX_SIZE
 )
 
 logger = setup_logging(__name__)
+
+
+class SearchCache:
+    """Simple TTL cache for Tidal search results."""
+
+    def __init__(self, ttl: int = 300, max_size: int = 50):
+        self.ttl = ttl
+        self.max_size = max_size
+        self._cache = {}  # key -> (timestamp, results)
+
+    def _make_key(self, query: str, search_type: str) -> str:
+        """Create cache key from query and search type."""
+        return f"{search_type}:{query.lower().strip()}"
+
+    def get(self, query: str, search_type: str):
+        """Get cached results if valid."""
+        key = self._make_key(query, search_type)
+        if key in self._cache:
+            timestamp, results = self._cache[key]
+            if time.time() - timestamp < self.ttl:
+                logger.debug(f"Cache hit for: {query}")
+                return results
+            else:
+                # Expired
+                del self._cache[key]
+        return None
+
+    def set(self, query: str, search_type: str, results):
+        """Store results in cache."""
+        # Evict oldest entries if cache is full
+        if len(self._cache) >= self.max_size:
+            oldest_key = min(self._cache.keys(), key=lambda k: self._cache[k][0])
+            del self._cache[oldest_key]
+
+        key = self._make_key(query, search_type)
+        self._cache[key] = (time.time(), results)
+        logger.debug(f"Cached results for: {query}")
 
 # URL for the activation sound
 ACTIVATION_SOUND_URL = "https://actions.google.com/sounds/v1/alarms/beep_short.ogg"
@@ -38,6 +77,11 @@ class TidalPlayer:
         self.media_controller = None
         self.browser = None  # Store browser for cleanup
         self.phonetic_matcher = PhoneticMatcher()
+
+        # Search cache
+        self._search_cache = None
+        if SEARCH_CACHE_ENABLED:
+            self._search_cache = SearchCache(ttl=SEARCH_CACHE_TTL, max_size=SEARCH_CACHE_MAX_SIZE)
 
         # Load Tidal session
         logger.info("Loading Tidal session...")
@@ -140,7 +184,7 @@ class TidalPlayer:
     
     def search_tidal(self, query, search_type='track', limit=5, retry=True):
         """
-        Search Tidal for music with retry support.
+        Search Tidal for music with retry and cache support.
 
         Args:
             query: Search query string
@@ -151,6 +195,12 @@ class TidalPlayer:
         Returns:
             List of search results or None
         """
+        # Check cache first
+        if self._search_cache:
+            cached = self._search_cache.get(query, search_type)
+            if cached is not None:
+                return cached
+
         max_attempts = RETRY_MAX_ATTEMPTS if retry else 1
         delay = RETRY_DELAY_SECONDS
 
@@ -160,22 +210,25 @@ class TidalPlayer:
                 search_result = self.session.search(query, limit=limit)
 
                 # tidalapi 0.8+ returns a dict with 'tracks', 'artists', 'albums' keys
+                results = None
                 if search_type == 'track' and search_result.get('tracks'):
-                    tracks = search_result['tracks']
-                    logger.debug(f"Found {len(tracks)} tracks")
-                    return tracks
+                    results = search_result['tracks']
+                    logger.debug(f"Found {len(results)} tracks")
                 elif search_type == 'artist' and search_result.get('artists'):
-                    artists = search_result['artists']
-                    logger.debug(f"Found {len(artists)} artists")
-                    return artists
+                    results = search_result['artists']
+                    logger.debug(f"Found {len(results)} artists")
                 elif search_type == 'album' and search_result.get('albums'):
-                    albums = search_result['albums']
-                    logger.debug(f"Found {len(albums)} albums")
-                    return albums
+                    results = search_result['albums']
+                    logger.debug(f"Found {len(results)} albums")
                 elif search_type == 'playlist' and search_result.get('playlists'):
-                    playlists = search_result['playlists']
-                    logger.debug(f"Found {len(playlists)} playlists")
-                    return playlists
+                    results = search_result['playlists']
+                    logger.debug(f"Found {len(results)} playlists")
+
+                if results:
+                    # Cache the results
+                    if self._search_cache:
+                        self._search_cache.set(query, search_type, results)
+                    return results
 
                 logger.warning(f"No {search_type} results found for: '{query}'")
                 return None
@@ -509,7 +562,9 @@ class TidalPlayer:
 
     def speak(self, message, lang='es', wait=True):
         """
-        Speak a message on the Chromecast using Google TTS.
+        Speak a message on the Chromecast using TTS engine.
+
+        Uses local TTS (pyttsx3) or Google TTS based on config.
 
         Args:
             message: Text to speak
@@ -521,8 +576,8 @@ class TidalPlayer:
             return False
 
         try:
-            import urllib.parse
-            tts_url = f"https://translate.google.com/translate_tts?ie=UTF-8&client=tw-ob&tl={lang}&q={urllib.parse.quote(message)}"
+            tts_engine = get_tts_engine()
+            tts_url = tts_engine.get_tts_url(message, lang)
 
             logger.debug(f"Speaking: {message}")
             self.media_controller.play_media(tts_url, 'audio/mp3')

@@ -4,6 +4,7 @@ Centralized audio processing for voice assistant.
 Hybrid Architecture:
 - Wake word detection: Vosk (local, fast, offline)
 - Command recognition: Google Speech API (cloud, accurate, free)
+- Voice Activity Detection: webrtcvad (reduces CPU by filtering silence)
 
 This allows users to say wake word + command together naturally,
 with high accuracy for artist names, song titles, and commands.
@@ -14,6 +15,7 @@ from vosk import Model, KaldiRecognizer
 import json
 import time
 import re
+import struct
 from config import (
     VOSK_MODEL_PATH,
     SAMPLE_RATE,
@@ -22,9 +24,18 @@ from config import (
     SPEECH_TIMEOUT,
     AUDIO_INPUT_DEVICE_INDEX,
     COMMAND_RECOGNITION,
+    VAD_ENABLED,
+    VAD_AGGRESSIVENESS,
     setup_logging
 )
 from pathlib import Path
+
+# Try to import webrtcvad for voice activity detection
+try:
+    import webrtcvad
+    WEBRTCVAD_AVAILABLE = True
+except ImportError:
+    WEBRTCVAD_AVAILABLE = False
 
 logger = setup_logging(__name__)
 
@@ -103,6 +114,24 @@ class AudioProcessor:
         self.recognizer = KaldiRecognizer(self.model, SAMPLE_RATE)
         self.recognizer.SetMaxAlternatives(5)
 
+        # Voice Activity Detection (VAD) - reduces CPU by skipping silence
+        self.vad_enabled = VAD_ENABLED
+        self.vad = None
+        self._silence_frames = 0
+        self._speech_frames = 0
+        self._vad_threshold = 500  # RMS threshold for energy-based VAD
+
+        if self.vad_enabled:
+            if WEBRTCVAD_AVAILABLE:
+                # webrtcvad requires specific sample rates, use energy-based fallback for 44100Hz
+                if SAMPLE_RATE in (8000, 16000, 32000, 48000):
+                    self.vad = webrtcvad.Vad(VAD_AGGRESSIVENESS)
+                    logger.debug(f"WebRTC VAD enabled (aggressiveness: {VAD_AGGRESSIVENESS})")
+                else:
+                    logger.debug(f"Using energy-based VAD (sample rate {SAMPLE_RATE}Hz not supported by webrtcvad)")
+            else:
+                logger.debug("Using energy-based VAD (webrtcvad not installed)")
+
         # Audio Stream
         self.audio = pyaudio.PyAudio()
         self.stream = self.audio.open(
@@ -128,8 +157,14 @@ class AudioProcessor:
                 data = self.stream.read(CHUNK_SIZE, exception_on_overflow=False)
 
                 if self.state == self.STATE_LISTENING_WAKE_WORD:
-                    self._process_wake_word(data)
+                    # Use VAD to skip processing silence (saves CPU)
+                    if self._is_speech(data):
+                        self._process_wake_word(data)
+                    # Still feed silence to Vosk occasionally to maintain state
+                    elif self._silence_frames % 10 == 0:
+                        self.recognizer.AcceptWaveform(data)
                 elif self.state == self.STATE_LISTENING_COMMAND:
+                    # Always process during command listening
                     self._process_command(data)
 
         except KeyboardInterrupt:
@@ -163,6 +198,44 @@ class AudioProcessor:
                 return (True, idx + len(phrase))
 
         return (False, 0)
+
+    def _is_speech(self, audio_data: bytes) -> bool:
+        """
+        Check if audio contains speech using VAD.
+
+        Uses webrtcvad if available and sample rate is compatible,
+        otherwise falls back to energy-based detection.
+
+        Args:
+            audio_data: Raw PCM audio bytes (16-bit signed)
+
+        Returns:
+            True if speech detected, False otherwise
+        """
+        if not self.vad_enabled:
+            return True  # Process all audio if VAD disabled
+
+        # Energy-based VAD (works with any sample rate)
+        try:
+            # Convert bytes to samples
+            samples = struct.unpack(f'{len(audio_data)//2}h', audio_data)
+            # Calculate RMS (root mean square)
+            rms = (sum(s * s for s in samples) / len(samples)) ** 0.5
+            is_speech = rms > self._vad_threshold
+
+            # Adaptive threshold: adjust based on recent activity
+            if is_speech:
+                self._speech_frames += 1
+                self._silence_frames = 0
+            else:
+                self._silence_frames += 1
+                # Reset speech counter after prolonged silence
+                if self._silence_frames > 30:  # ~0.5 seconds
+                    self._speech_frames = 0
+
+            return is_speech
+        except Exception:
+            return True  # On error, process audio anyway
 
     def _extract_command_after_wake_word(self, text):
         """

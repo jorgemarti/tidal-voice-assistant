@@ -6,7 +6,7 @@ Tidal Voice Assistant - Main Application (Refactored)
 from audio_processor import AudioProcessor
 from command_parser import MusicCommandParser
 from tidal_player import TidalPlayer
-from config import setup_logging
+from config import setup_logging, CHROMECAST_PRECONNECT
 import sys
 
 # Setup global logger
@@ -102,15 +102,23 @@ def main():
     print_banner()
 
     try:
+        # Pre-connect to Chromecast if enabled (reduces first-command latency)
+        if CHROMECAST_PRECONNECT:
+            logger.info("Pre-connecting to Chromecast...")
+            if tidal_player.find_chromecast():
+                logger.info(f"Chromecast ready: {tidal_player.cast_device.name}")
+            else:
+                logger.warning("Chromecast pre-connect failed. Will retry on first command.")
+
         logger.info("Initializing audio processor...")
-        
+
         # The AudioProcessor now orchestrates everything
         audio_processor = AudioProcessor(
             on_wake_word=on_wake_word_detected,
             on_command=on_command_received,
             on_timeout=on_command_timeout
         )
-        
+
         logger.info("Initialization complete. Starting main loop...")
         
         # This is a blocking call that runs until KeyboardInterrupt

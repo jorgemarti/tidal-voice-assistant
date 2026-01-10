@@ -7,6 +7,9 @@ SpeechRecognition>=3.10.0
 # Audio capture
 pyaudio==0.2.14
 
+# Voice Activity Detection (reduces CPU usage)
+webrtcvad==2.0.10
+
 # Tidal API integration
 tidalapi>=0.8.10
 
@@ -28,3 +31,6 @@ python-Levenshtein
 
 # Text-to-speech for testing (optional)
 gtts==2.5.0
+
+# Local TTS (offline, faster than Google TTS)
+pyttsx3==2.90

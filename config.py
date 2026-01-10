@@ -58,6 +58,7 @@ AUTOPLAY_TRACK_COUNT = 10  # Number of similar tracks to queue for autoplay
 # Chromecast Configuration
 # Replace with your Nest Mini's exact name from Google Home app
 CHROMECAST_NAME = "Altavoz Google"  # Your Nest Mini name
+CHROMECAST_PRECONNECT = True  # Connect to Chromecast on startup (reduces first-command latency)
 
 # Wake Word Configuration
 WAKE_WORDS = [
@@ -81,6 +82,20 @@ SAMPLE_RATE = 44100
 CHANNELS = 1
 CHUNK_SIZE = 8000
 AUDIO_INPUT_DEVICE_INDEX = 1  # USB PnP Sound Device (hw:2,0)
+
+# Voice Activity Detection (VAD) - reduces CPU usage by only processing speech
+VAD_ENABLED = True  # Enable VAD to reduce CPU from ~20% to ~5%
+VAD_AGGRESSIVENESS = 2  # 0-3, higher = more aggressive filtering (fewer false positives)
+
+# TTS Configuration
+TTS_ENGINE = 'local'  # Options: 'local' (pyttsx3, offline), 'google' (Google Translate TTS)
+TTS_LOCAL_RATE = 175  # Speech rate for local TTS (words per minute)
+TTS_LOCAL_VOICE = None  # None = system default, or specify voice name
+
+# Search Cache Configuration
+SEARCH_CACHE_ENABLED = True  # Cache Tidal search results
+SEARCH_CACHE_TTL = 300  # Cache time-to-live in seconds (5 minutes)
+SEARCH_CACHE_MAX_SIZE = 50  # Maximum number of cached searches
 
 # Note: Tidal authentication now uses OAuth device flow
 # No credentials needed in .env file
