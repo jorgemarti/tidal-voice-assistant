@@ -713,9 +713,18 @@ class TidalPlayer:
 
     def play(self):
         """Resume playback"""
+        if not self.cast_device:
+            logger.warning("Cannot resume: Chromecast not connected")
+            return False
         if self.media_controller:
-            self.media_controller.play()
-            logger.info("Playback resumed")
+            try:
+                self.media_controller.play()
+                logger.info("Playback resumed")
+                return True
+            except Exception as e:
+                logger.error(f"Resume failed: {e}")
+                return False
+        return False
 
     def skip(self):
         """Skip to next track in queue"""

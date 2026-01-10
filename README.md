@@ -44,7 +44,10 @@ This project creates a voice-controlled Tidal music player using a Raspberry Pi 
 sudo apt update && sudo apt upgrade -y
 
 # Install system dependencies
-sudo apt install -y python3-pip python3-venv portaudio19-dev git
+sudo apt install -y python3-pip python3-venv portaudio19-dev git flac
+
+# Install espeak for local TTS (optional - falls back to Google TTS if not installed)
+sudo apt install -y espeak-ng libespeak-ng1
 
 # Clone this repository
 git clone <your-repo-url>
