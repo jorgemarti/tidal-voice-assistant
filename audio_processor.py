@@ -10,6 +10,15 @@ This allows users to say wake word + command together naturally,
 with high accuracy for artist names, song titles, and commands.
 """
 
+# Suppress ALSA warnings/errors before importing PyAudio
+# These are harmless messages about missing audio configurations
+import ctypes
+try:
+    asound = ctypes.cdll.LoadLibrary('libasound.so.2')
+    asound.snd_lib_error_set_handler(ctypes.c_void_p(None))
+except OSError:
+    pass  # ALSA not available (e.g., macOS)
+
 import pyaudio
 from vosk import Model, KaldiRecognizer
 import json
