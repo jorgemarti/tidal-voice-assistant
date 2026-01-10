@@ -300,20 +300,27 @@ Tidal tokens auto-refresh, but the refresh token expires (~30 days). When this h
 tidal-voice-assistant/
 ├── README.md                    # This file
 ├── CLAUDE.md                    # Context for Claude Code
+├── improvements.md              # Future improvement ideas
 ├── architecture.svg             # Architecture diagram
 ├── requirements.txt             # Python dependencies
 ├── .env.example                 # Environment variables template
 ├── config.py                    # Application configuration
 ├── main.py                      # Main application entry point
-├── audio_processor.py          # Centralized audio processing (wake word + commands)
+├── audio_processor.py          # Centralized audio processing (wake word + commands + VAD)
+├── cloud_recognizer.py         # Google Speech API integration
 ├── command_parser.py           # Parse Spanish music commands
 ├── phonetic_matcher.py         # Phonetic matching for fuzzy search
 ├── tidal_player.py             # Tidal API and Chromecast integration
 ├── tidal_auth.py               # Tidal authentication
+├── tts_engine.py               # TTS engine (local pyttsx3 or Google)
+├── utils.py                    # Utility functions and decorators
 ├── list_audio_devices.py       # List available audio input devices
 ├── test_chromecast.py          # Chromecast testing utilities
 ├── test_tidal.py               # Tidal integration testing
 ├── test_wake_word.py           # Wake word detection testing
+├── tests/                       # Unit tests (pytest)
+│   ├── test_command_parser.py
+│   └── test_phonetic_matcher.py
 ├── tidal-assistant.service     # Systemd service file
 └── vosk-model-small-es-0.42/   # Spanish speech recognition model (downloaded)
 ```
@@ -383,7 +390,7 @@ LOG_LEVEL=WARNING   # Only warnings and errors
 
 ## 🚧 Known Limitations
 
-- Wake word detection uses ~15-25% CPU (continuous Vosk transcription)
+- Wake word detection uses ~5-10% CPU (with VAD enabled, was ~15-25%)
 - Detection latency: 200-500ms (vs <50ms with cloud-based solutions)
 - Requires good audio environment (low background noise)
 - Spanish speech recognition works best with clear pronunciation (Spain Spanish)
@@ -398,10 +405,15 @@ LOG_LEVEL=WARNING   # Only warnings and errors
 - [x] Full album and artist playback (queues all tracks)
 - [x] Playlist support
 - [x] Skip track functionality
+- [x] Voice Activity Detection (VAD) for CPU reduction
+- [x] Local TTS option (offline announcements)
+- [x] Search result caching
+- [x] Configurable wake word patterns
+- [x] Distinct audio cues (wake/success/error/timeout)
+- [x] Unit tests
 - [ ] Volume control via voice
 - [ ] Multi-language support (Catalan, etc.)
 - [ ] Web interface for configuration
-- [ ] Better error handling and user feedback
 - [ ] Integration with Home Assistant
 
 ## 🌐 External API Dependencies
