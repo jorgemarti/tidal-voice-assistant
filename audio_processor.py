@@ -294,9 +294,12 @@ class AudioProcessor:
                         self.recognizer.Reset()
                     else:
                         # Only wake word was said - wait for command
+                        # Reset and clear buffers for fresh command capture
+                        self.recognizer.Reset()
+                        self._audio_buffer = []
+                        self._last_command_partial = ""
                         self.state = self.STATE_LISTENING_COMMAND
                         self._command_listen_start_time = time.time()
-                        self.recognizer.Reset()
                         logger.debug(f"State changed to: {self.state}")
         else:
             # Check partial results for early wake word detection
@@ -310,9 +313,15 @@ class AudioProcessor:
                 if wake_found and not getattr(self, '_wake_word_pending', False):
                     logger.debug("Wake word detected in partial")
                     self._wake_word_pending = True
-                    self.on_wake_word()  # Play beep to acknowledge
+                    self.on_wake_word()  # Play TTS prompt (blocking)
 
-                    # Switch to command mode immediately
+                    # Reset recognizer and buffer AFTER TTS finishes
+                    # This ensures we capture fresh audio for command
+                    self.recognizer.Reset()
+                    self._audio_buffer = []
+                    self._last_command_partial = ""
+
+                    # Switch to command mode
                     self.state = self.STATE_LISTENING_COMMAND
                     self._command_listen_start_time = time.time()
                     logger.debug(f"State changed to: {self.state}")
