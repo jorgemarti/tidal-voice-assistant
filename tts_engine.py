@@ -12,6 +12,7 @@ import threading
 import http.server
 import socketserver
 import socket
+from contextlib import contextmanager
 from pathlib import Path
 from config import (
     TTS_ENGINE,
@@ -22,12 +23,28 @@ from config import (
 
 logger = setup_logging(__name__)
 
+
+@contextmanager
+def suppress_stderr():
+    """Temporarily suppress stderr output (ALSA/JACK warnings)."""
+    devnull = os.open(os.devnull, os.O_WRONLY)
+    old_stderr = os.dup(2)
+    os.dup2(devnull, 2)
+    os.close(devnull)
+    try:
+        yield
+    finally:
+        os.dup2(old_stderr, 2)
+        os.close(old_stderr)
+
+
 # Try to import pyttsx3 for local TTS
+PYTTSX3_AVAILABLE = False
 try:
-    import pyttsx3
+    with suppress_stderr():
+        import pyttsx3
     PYTTSX3_AVAILABLE = True
 except ImportError:
-    PYTTSX3_AVAILABLE = False
     logger.debug("pyttsx3 not available, local TTS disabled")
 
 
@@ -118,8 +135,9 @@ class TTSEngine:
 
         if self.engine_type == 'local' and PYTTSX3_AVAILABLE:
             try:
-                self.pyttsx_engine = pyttsx3.init()
-                self.pyttsx_engine.setProperty('rate', TTS_LOCAL_RATE)
+                with suppress_stderr():
+                    self.pyttsx_engine = pyttsx3.init()
+                    self.pyttsx_engine.setProperty('rate', TTS_LOCAL_RATE)
 
                 # Set voice if specified
                 if TTS_LOCAL_VOICE:

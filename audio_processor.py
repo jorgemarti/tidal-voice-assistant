@@ -10,16 +10,27 @@ This allows users to say wake word + command together naturally,
 with high accuracy for artist names, song titles, and commands.
 """
 
-# Suppress ALSA warnings/errors before importing PyAudio
+# Suppress ALSA/JACK warnings during PyAudio initialization
 # These are harmless messages about missing audio configurations
-import ctypes
-try:
-    asound = ctypes.cdll.LoadLibrary('libasound.so.2')
-    asound.snd_lib_error_set_handler(ctypes.c_void_p(None))
-except OSError:
-    pass  # ALSA not available (e.g., macOS)
+import os
+import sys
+from contextlib import contextmanager
 
-import pyaudio
+@contextmanager
+def suppress_stderr():
+    """Temporarily suppress stderr output (ALSA/JACK warnings)."""
+    devnull = os.open(os.devnull, os.O_WRONLY)
+    old_stderr = os.dup(2)
+    os.dup2(devnull, 2)
+    os.close(devnull)
+    try:
+        yield
+    finally:
+        os.dup2(old_stderr, 2)
+        os.close(old_stderr)
+
+with suppress_stderr():
+    import pyaudio
 from vosk import Model, KaldiRecognizer
 import json
 import time

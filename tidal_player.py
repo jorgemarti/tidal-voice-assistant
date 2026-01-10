@@ -92,6 +92,11 @@ class TidalPlayer:
         if SEARCH_CACHE_ENABLED:
             self._search_cache = SearchCache(ttl=SEARCH_CACHE_TTL, max_size=SEARCH_CACHE_MAX_SIZE)
 
+        # Track state for resume after TTS
+        self._current_track = None
+        self._paused_position = 0
+        self._was_paused_for_command = False
+
         # Load Tidal session
         logger.info("Loading Tidal session...")
         self.session = load_tidal_session()
@@ -307,6 +312,10 @@ class TidalPlayer:
                 if not enqueue:
                     self.media_controller.block_until_active()
                     logger.info("Playback started successfully")
+                    # Store current track for resume capability
+                    self._current_track = track
+                    self._paused_position = 0
+                    self._was_paused_for_command = False
                 else:
                     logger.debug(f"Track queued: {track.name}")
 
@@ -680,6 +689,11 @@ class TidalPlayer:
 
     def stop(self):
         """Stop playback and clear queue"""
+        # Reset resume state
+        self._was_paused_for_command = False
+        self._current_track = None
+        self._paused_position = 0
+
         if self.media_controller:
             try:
                 # Stop current playback
@@ -706,16 +720,55 @@ class TidalPlayer:
                 logger.error(f"Error clearing queue: {e}")
 
     def pause(self):
-        """Pause playback"""
+        """Pause playback and store position for later resume."""
         if self.media_controller:
+            try:
+                # Get current position before pausing
+                self.media_controller.update_status()
+                status = self.media_controller.status
+                if status and status.current_time:
+                    self._paused_position = status.current_time
+                    logger.debug(f"Stored pause position: {self._paused_position:.1f}s")
+            except Exception as e:
+                logger.debug(f"Could not get pause position: {e}")
+                self._paused_position = 0
+
             self.media_controller.pause()
+            self._was_paused_for_command = True
             logger.info("Playback paused")
 
     def play(self):
-        """Resume playback"""
+        """Resume playback - re-starts track if TTS interrupted."""
         if not self.cast_device:
             logger.warning("Cannot resume: Chromecast not connected")
             return False
+
+        # If we were paused for a command and have a track to resume,
+        # we need to re-start it because TTS replaced the media
+        if self._was_paused_for_command and self._current_track:
+            logger.debug(f"Re-starting track from {self._paused_position:.1f}s")
+            self._was_paused_for_command = False
+            try:
+                stream_url = self._current_track.get_url()
+                if stream_url:
+                    # Play and seek to position
+                    self.media_controller.play_media(
+                        stream_url,
+                        'audio/mp4',
+                        title=self._current_track.name,
+                        thumb=self._current_track.album.image(1280) if self._current_track.album else None,
+                        current_time=self._paused_position
+                    )
+                    logger.info(f"Playback resumed at {self._paused_position:.1f}s")
+                    return True
+                else:
+                    logger.error("Could not get stream URL for resume")
+                    return False
+            except Exception as e:
+                logger.error(f"Resume from position failed: {e}")
+                return False
+
+        # Standard resume (no TTS interruption)
         if self.media_controller:
             try:
                 self.media_controller.play()
