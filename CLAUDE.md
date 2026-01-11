@@ -69,11 +69,14 @@ For a detailed visual representation of the system architecture, see [architectu
 
 ### 1. Audio Processor (`audio_processor.py`)
 - **Hybrid architecture**: Vosk for wake word, Google Speech API for commands
-- Vosk handles wake word detection locally (fast, offline)
+- **Vosk grammar mode**: Constrained vocabulary for improved wake word accuracy
+- Vosk handles wake word detection locally (fast, offline, limited vocabulary)
 - After wake word: buffers audio and sends to Google for accurate transcription
-- Falls back to Vosk if Google is unavailable
+- Falls back to full-vocabulary Vosk if Google is unavailable
 - Default wake phrases: "Okay música", "Okey música"
 - Flexible regex matching for wake word variations
+- Voice Activity Detection (VAD) reduces CPU by filtering silence
+- Software audio gain for microphone sensitivity boost
 - 8-second timeout for command listening
 
 ### 1.1 Cloud Recognizer (`cloud_recognizer.py`)
@@ -103,16 +106,19 @@ For a detailed visual representation of the system architecture, see [architectu
 
 ### 4. Tidal Integration (`tidal_player.py`)
 - OAuth device flow authentication
-- Search API integration
+- Search API integration with caching
 - Stream URL fetching
 - Session management with token refresh (auto-saves refreshed tokens)
 - **Autoplay/Continuous playback**: Automatically queues similar tracks using Tidal's track radio feature
+- **Internal queue tracking**: Maintains track queue that survives TTS interruption
+- **Shuffle support**: Artists, playlists, and radio tracks are shuffled for variety
 - **Token expiry notification**: When refresh token expires (~30 days), announces on Nest Mini in Spanish that manual re-auth is needed
 
 ### 5. Chromecast Handler (`tidal_player.py`)
 - Device discovery on local network
 - Media casting via pychromecast
 - Handles stream URLs from Tidal
+- Pre-connects at startup for faster response
 
 ## Spanish Command Patterns
 
@@ -200,10 +206,10 @@ TTS_SHORT_ANNOUNCEMENTS = False  # Brief "Rosalía" vs full "Reproduciendo Rosal
 10. **Autoplay**: Similar tracks are automatically queued for continuous playback
 
 **Autoplay Behavior:**
-- **Single song**: Plays the requested track, then queues 10 similar tracks from Tidal's track radio
-- **Artist**: Queues up to 20 top tracks from the artist
-- **Album**: Queues all tracks from the album in order
-- **Playlist**: Queues all tracks from the playlist
+- **Single song**: Plays the requested track, then queues 10 similar tracks from Tidal's track radio (shuffled)
+- **Artist**: Queues up to 20 top tracks from the artist (shuffled)
+- **Album**: Queues all tracks from the album in order (not shuffled - preserves album order)
+- **Playlist**: Queues all tracks from the playlist (shuffled)
 
 Autoplay can be disabled by setting `AUTOPLAY_ENABLED = False` in `config.py`.
 
@@ -228,9 +234,10 @@ For non-music commands, user continues using:
 
 ### Phase 1: Core Functionality (Completed)
 - [x] Wake word detection (Vosk-based, fully offline)
-- [x] Spanish speech recognition
+- [x] Vosk grammar mode for improved wake word accuracy
+- [x] Spanish speech recognition (hybrid: Vosk + Google)
 - [x] Basic command parsing
-- [x] Tidal authentication
+- [x] Tidal authentication (OAuth device flow)
 - [x] Chromecast streaming
 - [x] Testing utilities
 - [x] Comprehensive wake word testing and troubleshooting
@@ -238,15 +245,16 @@ For non-music commands, user continues using:
 - [x] Retry mechanisms with exponential backoff
 - [x] Basic playback control (stop, pause, resume)
 - [x] **Autoplay/Continuous playback** (queues similar tracks automatically)
-- [x] **Full album and artist playback** (queues all tracks, not just first)
+- [x] **Full album and artist playback** (queues all tracks with shuffle)
 
-### Phase 2: Enhanced Features
-- [ ] Optimize wake word CPU usage
-- [ ] Improved command parsing (more variations)
-- [ ] Error handling and user feedback
-- [ ] Volume control
-- [x] **Skip track functionality** ("siguiente", "salta")
+### Phase 2: Enhanced Features (Completed)
+- [x] Voice Activity Detection (VAD) for CPU optimization
+- [x] Software audio gain for microphone sensitivity
+- [x] Search result caching
+- [x] Internal queue tracking (survives TTS interruption)
+- [x] **Skip track functionality** ("siguiente", "salta", "pasa la canción")
 - [x] **Playlist support** ("reproduce la playlist X")
+- [ ] Volume control via voice
 
 ### Phase 3: Advanced Features
 - [ ] Multi-room audio
@@ -274,12 +282,13 @@ For non-music commands, user continues using:
 
 ## Known Issues & Limitations
 
-1. **Wake Word CPU Usage**: Vosk-based wake word uses ~15-25% CPU (continuous transcription) - acceptable for dedicated Pi 5
+1. **Wake Word CPU Usage**: ~5-10% CPU with VAD and grammar mode (improved from ~15-25%)
 2. **Wake Word Latency**: 200-500ms detection time (vs <50ms with cloud solutions like Picovoice)
 3. **Network Dependency**: Requires stable WiFi for command recognition (Google API) and Chromecast
 4. **Wake Word Offline**: Wake word detection works without internet; only command recognition needs network
 5. **Tidal API**: Rate limits may apply for heavy usage
 6. **Language**: Currently only Spanish from Spain (could add Catalan)
+7. **Chromecast Queue**: TTS interrupts Chromecast queue (mitigated with internal queue tracking)
 
 ## Security Considerations
 
@@ -291,11 +300,11 @@ For non-music commands, user continues using:
 
 ## Performance Considerations
 
-- **Wake word detection**: 200-500ms latency, ~15-25% CPU usage (continuous Vosk)
+- **Wake word detection**: 200-500ms latency, ~5-10% CPU usage (with VAD + grammar mode)
 - **Command recognition**: 1-2 seconds (Google Speech API, high accuracy)
-- **Tidal search**: 500ms-1s (network dependent)
+- **Tidal search**: 500ms-1s (with caching for repeated queries)
 - **TTS announcement**: 2-4 seconds
-- **Chromecast streaming**: <1s buffering
+- **Chromecast streaming**: <1s buffering (pre-connected at startup)
 - **Total response time**: 5-8 seconds from wake word to music playback (with TTS announcement)
 
 ## Dependencies

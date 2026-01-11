@@ -19,7 +19,7 @@ This project creates a voice-controlled Tidal music player using a Raspberry Pi 
 6. Announces what will be played, then streams audio to Nest Mini via Chromecast
 7. For non-music commands, continue using "Ok Google" directly on Nest Mini
 
-**Note**: Wake word detection uses Vosk with a single full-model recognizer (fully offline). This allows saying wake word + command together naturally.
+**Note**: Wake word detection uses Vosk with constrained grammar mode (limited vocabulary) for improved accuracy. Command recognition uses Google Speech API for high accuracy with artist/song names. Both wake word + command can be said together naturally.
 
 ## 📋 Hardware Requirements
 
@@ -420,26 +420,30 @@ LOG_LEVEL=WARNING   # Only warnings and errors
 
 ## 🚧 Known Limitations
 
-- Wake word detection uses ~5-10% CPU (with VAD enabled, was ~15-25%)
+- Wake word detection uses ~5-10% CPU (with VAD + grammar mode)
 - Detection latency: 200-500ms (vs <50ms with cloud-based solutions)
 - Requires good audio environment (low background noise)
 - Spanish speech recognition works best with clear pronunciation (Spain Spanish)
-- Network latency affects response time
-- Tidal API rate limits may apply
+- Network latency affects response time (Google Speech API for commands)
+- Tidal API rate limits may apply for heavy usage
 - Tidal refresh tokens expire (~30 days) - voice notification will alert you
+- Chromecast queue is lost during TTS (mitigated with internal queue tracking)
 
 ## 🛣️ Future Enhancements
 
 - [x] Fully offline wake word detection (no external APIs)
+- [x] Vosk grammar mode for improved wake word accuracy
+- [x] Hybrid speech recognition (Vosk wake word + Google commands)
 - [x] Autoplay/continuous playback (queues similar tracks)
-- [x] Full album and artist playback (queues all tracks)
-- [x] Playlist support
-- [x] Skip track functionality
+- [x] Full album and artist playback (queues all tracks, shuffled)
+- [x] Playlist support (with shuffle)
+- [x] Skip track functionality (with internal queue tracking)
 - [x] Voice Activity Detection (VAD) for CPU reduction
 - [x] Local TTS option (offline announcements)
 - [x] Search result caching
 - [x] Configurable wake word patterns
 - [x] Distinct audio cues (wake/success/error/timeout)
+- [x] Software audio gain for microphone sensitivity
 - [x] Unit tests
 - [ ] Volume control via voice
 - [ ] Multi-language support (Catalan, etc.)
