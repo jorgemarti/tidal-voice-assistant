@@ -362,6 +362,32 @@ tidal-voice-assistant/
 - Check network bandwidth
 - Reduce WiFi interference
 
+### Microphone Sensitivity Issues
+If the wake word detection is unreliable:
+
+1. **Check microphone levels:**
+   ```bash
+   # List USB mic controls
+   amixer -c 2 scontrols
+
+   # Set mic to maximum
+   amixer -c 2 set 'Mic' 100%
+
+   # Disable Auto Gain Control (can reduce sensitivity)
+   amixer -c 2 set 'Auto Gain Control' off
+   ```
+
+2. **Enable software amplification** in `config.py`:
+   ```python
+   AUDIO_GAIN = 1.5  # Boost mic input (1.0 = no change, 2.0 = double)
+   ```
+
+3. **Verify correct microphone** is selected:
+   ```bash
+   python list_audio_devices.py
+   ```
+   Update `AUDIO_INPUT_DEVICE_INDEX` in `config.py` if needed.
+
 ### Python Dependencies Issues
 ```bash
 # Reinstall in clean environment

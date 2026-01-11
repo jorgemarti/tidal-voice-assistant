@@ -175,6 +175,14 @@ CHROMECAST_NAME = "Altavoz Google"  # User's Nest Mini name
 # Hybrid Speech Recognition
 COMMAND_RECOGNITION = 'google'  # 'google' (cloud) or 'vosk' (local fallback)
 COMMAND_LANGUAGE = 'es-ES'      # Spanish (Spain) for Google Speech API
+
+# Audio Configuration
+AUDIO_INPUT_DEVICE_INDEX = 1  # USB mic device index (run list_audio_devices.py)
+AUDIO_GAIN = 1.0              # Software amplification (1.0 = off, 1.5-2.0 = boost)
+
+# TTS Configuration
+TTS_ENGINE = 'google'         # 'google' (recommended) or 'local' (pyttsx3)
+TTS_SHORT_ANNOUNCEMENTS = False  # Brief "Rosalía" vs full "Reproduciendo Rosalía"
 ```
 
 ## Usage Flow
