@@ -63,10 +63,16 @@ CHROMECAST_PRECONNECT = True  # Connect to Chromecast on startup (reduces first-
 # Wake Word Configuration
 # Add your custom wake phrases here (Vosk uses unaccented text)
 # The system also uses a flexible regex pattern for variations
+# Include common Vosk misrecognitions
 WAKE_WORDS = [
     'okay musica',    # No accent - Vosk uses unaccented
     'okey musica',
     'okey musical',
+    'okay musical',
+    'okay muy sica',  # Common misrecognition
+    'okey muy sica',
+    'okay muisica',
+    'okey muisica',
 ]
 
 # Custom wake word regex pattern (optional)

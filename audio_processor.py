@@ -211,7 +211,8 @@ class AudioProcessor:
             pattern = WAKE_WORD_PATTERN
         else:
             # Default: ok/okay/okey/okei/oque + musica/música/musical
-            pattern = r'\b(o[kq](?:a?y|e[iy]|ue)?)\s*(m[uú]sica?l?)\b'
+            # Also accepts common Vosk misrecognitions: "muy sica", "muisica", etc.
+            pattern = r'\b(o[kq](?:a?y|e[iy]|ue)?)\s*(m[uú](?:y\s*)?(?:sica?l?|isica))\b'
         match = re.search(pattern, text_lower)
 
         if match:

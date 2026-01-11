@@ -120,6 +120,27 @@ class MusicCommandParser:
                             'original_text': text
                         }
 
+        # Fallback: treat bare text as a search query
+        # Handle "de [artista]" -> play artist
+        # Handle "[anything else]" -> play song (search will find artist too)
+        if text:
+            query = text
+            action = 'play_song'
+
+            # "de rosalía" -> search for artist "rosalía"
+            de_match = re.match(r'^de\s+(.+)$', text, re.IGNORECASE)
+            if de_match:
+                query = de_match.group(1).strip()
+                action = 'play_artist'
+
+            query = self._clean_query(query)
+            if query and len(query) >= 2:  # At least 2 chars
+                return {
+                    'action': action,
+                    'query': query,
+                    'original_text': text
+                }
+
         return None
     
     def _clean_query(self, query: str) -> str:
