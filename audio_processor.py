@@ -132,6 +132,10 @@ class AudioProcessor:
         self.wake_phrases = [phrase.lower().strip() for phrase in WAKE_WORDS]
         logger.debug(f"Wake phrases: {self.wake_phrases}")
 
+        # Sliding window for partial results (to catch split wake words)
+        self._recent_partials = []
+        self._partial_window_size = 5  # Keep last N partials
+
         # Vosk recognizer for wake word detection
         # Also used as fallback for commands if cloud is unavailable
         self.recognizer = KaldiRecognizer(self.model, SAMPLE_RATE)
@@ -356,8 +360,18 @@ class AudioProcessor:
             if partial_text:
                 logger.debug(f"Partial: '{partial_text}'")
 
-                # Check if wake word is in partial result
+                # Add to sliding window of recent partials
+                self._recent_partials.append(partial_text)
+                if len(self._recent_partials) > self._partial_window_size:
+                    self._recent_partials.pop(0)
+
+                # Check current partial AND combined recent partials for wake word
+                # This catches cases where Vosk splits "okay" and "música"
+                combined_text = ' '.join(self._recent_partials)
                 wake_found, end_idx = self._is_wake_word_match(partial_text)
+                if not wake_found:
+                    wake_found, end_idx = self._is_wake_word_match(combined_text)
+
                 if wake_found and not getattr(self, '_wake_word_pending', False):
                     logger.debug("Wake word detected in partial")
                     self._wake_word_pending = True
@@ -368,6 +382,7 @@ class AudioProcessor:
                     self.recognizer.Reset()
                     self._audio_buffer = []
                     self._last_command_partial = ""
+                    self._recent_partials = []  # Clear sliding window
 
                     # Switch to command mode
                     self.state = self.STATE_LISTENING_COMMAND
