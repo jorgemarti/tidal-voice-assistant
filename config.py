@@ -95,6 +95,7 @@ SAMPLE_RATE = 44100
 CHANNELS = 1
 CHUNK_SIZE = 8000
 AUDIO_INPUT_DEVICE_INDEX = 1  # USB PnP Sound Device (hw:2,0)
+AUDIO_GAIN = 1.0  # Software amplification (1.0 = no change, 2.0 = double volume, etc.)
 
 # Voice Activity Detection (VAD) - reduces CPU usage by only processing speech
 VAD_ENABLED = True  # Enable VAD to reduce CPU from ~20% to ~5%

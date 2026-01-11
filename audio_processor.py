@@ -36,6 +36,7 @@ import json
 import time
 import re
 import struct
+import numpy as np
 from config import (
     VOSK_MODEL_PATH,
     SAMPLE_RATE,
@@ -47,6 +48,7 @@ from config import (
     COMMAND_RECOGNITION,
     VAD_ENABLED,
     VAD_AGGRESSIVENESS,
+    AUDIO_GAIN,
     setup_logging
 )
 from pathlib import Path
@@ -178,6 +180,10 @@ class AudioProcessor:
             while True:
                 data = self.stream.read(CHUNK_SIZE, exception_on_overflow=False)
 
+                # Apply software gain if configured
+                if AUDIO_GAIN != 1.0:
+                    data = self._apply_gain(data, AUDIO_GAIN)
+
                 if self.state == self.STATE_LISTENING_WAKE_WORD:
                     # Use VAD to skip processing silence (saves CPU)
                     if self._is_speech(data):
@@ -226,6 +232,26 @@ class AudioProcessor:
                 return (True, idx + len(phrase))
 
         return (False, 0)
+
+    def _apply_gain(self, audio_data: bytes, gain: float) -> bytes:
+        """
+        Apply software gain to audio data.
+
+        Args:
+            audio_data: Raw PCM audio bytes (16-bit signed)
+            gain: Multiplier (1.0 = no change, 2.0 = double volume)
+
+        Returns:
+            Amplified audio bytes, clipped to prevent distortion
+        """
+        # Convert to numpy array for fast processing
+        samples = np.frombuffer(audio_data, dtype=np.int16).astype(np.float32)
+        # Apply gain
+        samples *= gain
+        # Clip to prevent distortion (int16 range: -32768 to 32767)
+        samples = np.clip(samples, -32768, 32767)
+        # Convert back to bytes
+        return samples.astype(np.int16).tobytes()
 
     def _is_speech(self, audio_data: bytes) -> bool:
         """
