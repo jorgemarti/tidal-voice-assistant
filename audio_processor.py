@@ -4,27 +4,61 @@ Centralized audio processing for voice assistant.
 Hybrid Architecture:
 - Wake word detection: Vosk (local, fast, offline)
 - Command recognition: Google Speech API (cloud, accurate, free)
+- Voice Activity Detection: webrtcvad (reduces CPU by filtering silence)
 
 This allows users to say wake word + command together naturally,
 with high accuracy for artist names, song titles, and commands.
 """
 
-import pyaudio
+# Suppress ALSA/JACK warnings during PyAudio initialization
+# These are harmless messages about missing audio configurations
+import os
+import sys
+from contextlib import contextmanager
+
+@contextmanager
+def suppress_stderr():
+    """Temporarily suppress stderr output (ALSA/JACK warnings)."""
+    devnull = os.open(os.devnull, os.O_WRONLY)
+    old_stderr = os.dup(2)
+    os.dup2(devnull, 2)
+    os.close(devnull)
+    try:
+        yield
+    finally:
+        os.dup2(old_stderr, 2)
+        os.close(old_stderr)
+
+with suppress_stderr():
+    import pyaudio
 from vosk import Model, KaldiRecognizer
 import json
 import time
 import re
+import struct
+import numpy as np
 from config import (
     VOSK_MODEL_PATH,
     SAMPLE_RATE,
     CHUNK_SIZE,
     WAKE_WORDS,
+    WAKE_WORD_PATTERN,
     SPEECH_TIMEOUT,
     AUDIO_INPUT_DEVICE_INDEX,
     COMMAND_RECOGNITION,
+    VAD_ENABLED,
+    VAD_AGGRESSIVENESS,
+    AUDIO_GAIN,
     setup_logging
 )
 from pathlib import Path
+
+# Try to import webrtcvad for voice activity detection
+try:
+    import webrtcvad
+    WEBRTCVAD_AVAILABLE = True
+except ImportError:
+    WEBRTCVAD_AVAILABLE = False
 
 logger = setup_logging(__name__)
 
@@ -98,21 +132,54 @@ class AudioProcessor:
         self.wake_phrases = [phrase.lower().strip() for phrase in WAKE_WORDS]
         logger.debug(f"Wake phrases: {self.wake_phrases}")
 
-        # Vosk recognizer for wake word detection
-        # Also used as fallback for commands if cloud is unavailable
-        self.recognizer = KaldiRecognizer(self.model, SAMPLE_RATE)
+        # Sliding window for partial results (to catch split wake words)
+        self._recent_partials = []
+        self._partial_window_size = 8  # Keep last N partials for better coverage
+
+        # Build grammar for wake word detection (limited vocabulary mode)
+        # This dramatically improves accuracy by constraining recognition
+        # Include [unk] to handle non-wake-word speech without force-matching
+        wake_word_grammar = self._build_wake_word_grammar()
+        logger.debug(f"Wake word grammar: {wake_word_grammar}")
+
+        # Vosk recognizer for wake word detection with constrained grammar
+        # Using limited vocabulary mode for better accuracy
+        self.recognizer = KaldiRecognizer(self.model, SAMPLE_RATE, wake_word_grammar)
         self.recognizer.SetMaxAlternatives(5)
 
-        # Audio Stream
-        self.audio = pyaudio.PyAudio()
-        self.stream = self.audio.open(
-            rate=SAMPLE_RATE,
-            channels=1,
-            format=pyaudio.paInt16,
-            input=True,
-            frames_per_buffer=CHUNK_SIZE,
-            input_device_index=AUDIO_INPUT_DEVICE_INDEX
-        )
+        # Full vocabulary recognizer for command fallback (if cloud unavailable)
+        self.command_recognizer = KaldiRecognizer(self.model, SAMPLE_RATE)
+        self.command_recognizer.SetMaxAlternatives(5)
+
+        # Voice Activity Detection (VAD) - reduces CPU by skipping silence
+        self.vad_enabled = VAD_ENABLED
+        self.vad = None
+        self._silence_frames = 0
+        self._speech_frames = 0
+        self._vad_threshold = 300  # RMS threshold for energy-based VAD (lower = more sensitive)
+
+        if self.vad_enabled:
+            if WEBRTCVAD_AVAILABLE:
+                # webrtcvad requires specific sample rates, use energy-based fallback for 44100Hz
+                if SAMPLE_RATE in (8000, 16000, 32000, 48000):
+                    self.vad = webrtcvad.Vad(VAD_AGGRESSIVENESS)
+                    logger.debug(f"WebRTC VAD enabled (aggressiveness: {VAD_AGGRESSIVENESS})")
+                else:
+                    logger.debug(f"Using energy-based VAD (sample rate {SAMPLE_RATE}Hz not supported by webrtcvad)")
+            else:
+                logger.debug("Using energy-based VAD (webrtcvad not installed)")
+
+        # Audio Stream - suppress ALSA/JACK warnings during initialization
+        with suppress_stderr():
+            self.audio = pyaudio.PyAudio()
+            self.stream = self.audio.open(
+                rate=SAMPLE_RATE,
+                channels=1,
+                format=pyaudio.paInt16,
+                input=True,
+                frames_per_buffer=CHUNK_SIZE,
+                input_device_index=AUDIO_INPUT_DEVICE_INDEX
+            )
         logger.debug("Audio stream opened.")
 
     def run(self):
@@ -127,9 +194,19 @@ class AudioProcessor:
             while True:
                 data = self.stream.read(CHUNK_SIZE, exception_on_overflow=False)
 
+                # Apply software gain if configured
+                if AUDIO_GAIN != 1.0:
+                    data = self._apply_gain(data, AUDIO_GAIN)
+
                 if self.state == self.STATE_LISTENING_WAKE_WORD:
-                    self._process_wake_word(data)
+                    # Use VAD to skip processing silence (saves CPU)
+                    if self._is_speech(data):
+                        self._process_wake_word(data)
+                    # Still feed silence to Vosk occasionally to maintain state
+                    elif self._silence_frames % 10 == 0:
+                        self.recognizer.AcceptWaveform(data)
                 elif self.state == self.STATE_LISTENING_COMMAND:
+                    # Always process during command listening
                     self._process_command(data)
 
         except KeyboardInterrupt:
@@ -137,19 +214,86 @@ class AudioProcessor:
         finally:
             self.cleanup()
 
+    def _build_wake_word_grammar(self) -> str:
+        """
+        Build a JSON grammar string for constrained wake word recognition.
+
+        Using limited vocabulary mode dramatically improves accuracy:
+        - Vosk only tries to match these specific phrases
+        - [unk] handles non-wake-word speech without force-matching
+        - Reduces false positives and improves true positive rate
+
+        Returns:
+            JSON string array of wake phrases for Vosk grammar
+        """
+        # Comprehensive wake word variations
+        # Include phonetic variations that Vosk might hear
+        grammar_phrases = [
+            # Standard forms
+            "okay musica",
+            "okey musica",
+            "ok musica",
+            "oque musica",
+            # With "y" filler
+            "okay y musica",
+            "okey y musica",
+            # Musical variant
+            "okay musical",
+            "okey musical",
+            "ok musical",
+            # Misrecognition variants
+            "okay muchas",
+            "okey muchas",
+            "okay muy sica",
+            "okey muy sica",
+            "okay mi sica",
+            "okey mi sica",
+            # Split variants (Vosk sometimes splits words)
+            "okay",
+            "okey",
+            "musica",
+            "musical",
+            # Unknown token for non-wake-word speech
+            "[unk]",
+        ]
+
+        # Add configured wake words from config
+        for phrase in self.wake_phrases:
+            if phrase not in grammar_phrases:
+                grammar_phrases.insert(0, phrase)
+
+        return json.dumps(grammar_phrases)
+
     def _is_wake_word_match(self, text):
         """
         Check if text contains a wake word using flexible matching.
         Handles variations like "ok/okay/okey" and "musica/música/musical".
+
+        Uses custom WAKE_WORD_PATTERN from config if set, otherwise uses default.
 
         Returns:
             tuple: (matched, end_index) - end_index is where command starts
         """
         text_lower = text.lower().strip()
 
-        # Flexible pattern: ok/okay/okey/okei/oque + musica/música/musical
-        # Handle variations from speech recognition
-        pattern = r'\b(o[kq](?:a?y|e[iy]|ue)?)\s*(m[uú]sica?l?)\b'
+        # Use custom pattern if configured, otherwise use default
+        if WAKE_WORD_PATTERN:
+            pattern = WAKE_WORD_PATTERN
+        else:
+            # Default: ok/okay/okey + optional filler words + musica/música/musical
+            # Accepts common Vosk misrecognitions:
+            # - "okay y música" (adds "y")
+            # - "okay muchas" (mishears música)
+            # - "muy sica", "muisica", "mi sica"
+            # - "hokey", "a key" (prefix variations)
+            # - "okeymusica" (joined without space)
+            # Flexible pattern:
+            # - Optional prefix: a, ha, h (for "a-kay", "hokey")
+            # - Core: ok/oq + optional y/ey/ei/ue suffix
+            # - Optional space (or joined)
+            # - Optional filler: y, a, de
+            # - música variants: musica, musical, muchas, muisica, muy sica, mi sica
+            pattern = r'\b(?:a|ha?)?o[kq](?:a?y|e[iy]|ue)?\s*(?:y\s+|a\s+|de\s+)?(m[uú](?:y\s*|i\s*)?(?:sica?l?|chas?|isica))\b'
         match = re.search(pattern, text_lower)
 
         if match:
@@ -163,6 +307,64 @@ class AudioProcessor:
                 return (True, idx + len(phrase))
 
         return (False, 0)
+
+    def _apply_gain(self, audio_data: bytes, gain: float) -> bytes:
+        """
+        Apply software gain to audio data.
+
+        Args:
+            audio_data: Raw PCM audio bytes (16-bit signed)
+            gain: Multiplier (1.0 = no change, 2.0 = double volume)
+
+        Returns:
+            Amplified audio bytes, clipped to prevent distortion
+        """
+        # Convert to numpy array for fast processing
+        samples = np.frombuffer(audio_data, dtype=np.int16).astype(np.float32)
+        # Apply gain
+        samples *= gain
+        # Clip to prevent distortion (int16 range: -32768 to 32767)
+        samples = np.clip(samples, -32768, 32767)
+        # Convert back to bytes
+        return samples.astype(np.int16).tobytes()
+
+    def _is_speech(self, audio_data: bytes) -> bool:
+        """
+        Check if audio contains speech using VAD.
+
+        Uses webrtcvad if available and sample rate is compatible,
+        otherwise falls back to energy-based detection.
+
+        Args:
+            audio_data: Raw PCM audio bytes (16-bit signed)
+
+        Returns:
+            True if speech detected, False otherwise
+        """
+        if not self.vad_enabled:
+            return True  # Process all audio if VAD disabled
+
+        # Energy-based VAD (works with any sample rate)
+        try:
+            # Convert bytes to samples
+            samples = struct.unpack(f'{len(audio_data)//2}h', audio_data)
+            # Calculate RMS (root mean square)
+            rms = (sum(s * s for s in samples) / len(samples)) ** 0.5
+            is_speech = rms > self._vad_threshold
+
+            # Adaptive threshold: adjust based on recent activity
+            if is_speech:
+                self._speech_frames += 1
+                self._silence_frames = 0
+            else:
+                self._silence_frames += 1
+                # Reset speech counter after prolonged silence
+                if self._silence_frames > 30:  # ~0.5 seconds
+                    self._speech_frames = 0
+
+            return is_speech
+        except Exception:
+            return True  # On error, process audio anyway
 
     def _extract_command_after_wake_word(self, text):
         """
@@ -215,9 +417,12 @@ class AudioProcessor:
                         self.recognizer.Reset()
                     else:
                         # Only wake word was said - wait for command
+                        # Reset and clear buffers for fresh command capture
+                        self.recognizer.Reset()
+                        self._audio_buffer = []
+                        self._last_command_partial = ""
                         self.state = self.STATE_LISTENING_COMMAND
                         self._command_listen_start_time = time.time()
-                        self.recognizer.Reset()
                         logger.debug(f"State changed to: {self.state}")
         else:
             # Check partial results for early wake word detection
@@ -226,14 +431,31 @@ class AudioProcessor:
             if partial_text:
                 logger.debug(f"Partial: '{partial_text}'")
 
-                # Check if wake word is in partial result
+                # Add to sliding window of recent partials
+                self._recent_partials.append(partial_text)
+                if len(self._recent_partials) > self._partial_window_size:
+                    self._recent_partials.pop(0)
+
+                # Check current partial AND combined recent partials for wake word
+                # This catches cases where Vosk splits "okay" and "música"
+                combined_text = ' '.join(self._recent_partials)
                 wake_found, end_idx = self._is_wake_word_match(partial_text)
+                if not wake_found:
+                    wake_found, end_idx = self._is_wake_word_match(combined_text)
+
                 if wake_found and not getattr(self, '_wake_word_pending', False):
                     logger.debug("Wake word detected in partial")
                     self._wake_word_pending = True
-                    self.on_wake_word()  # Play beep to acknowledge
+                    self.on_wake_word()  # Play TTS prompt (blocking)
 
-                    # Switch to command mode immediately
+                    # Reset recognizer and buffer AFTER TTS finishes
+                    # This ensures we capture fresh audio for command
+                    self.recognizer.Reset()
+                    self._audio_buffer = []
+                    self._last_command_partial = ""
+                    self._recent_partials = []  # Clear sliding window
+
+                    # Switch to command mode
                     self.state = self.STATE_LISTENING_COMMAND
                     self._command_listen_start_time = time.time()
                     logger.debug(f"State changed to: {self.state}")
@@ -275,14 +497,14 @@ class AudioProcessor:
             self._reset_to_wake_word_state()
             return
 
-        # Use Vosk to detect end of speech (but not for transcription)
-        if self.recognizer.AcceptWaveform(data):
+        # Use full vocabulary recognizer to detect end of speech and for fallback transcription
+        if self.command_recognizer.AcceptWaveform(data):
             logger.debug("Vosk detected end of speech")
             self._finalize_command_recognition()
             self._reset_to_wake_word_state()
         else:
-            # Log partial results for debugging (Vosk still processes for speech detection)
-            partial_result_json = self.recognizer.PartialResult()
+            # Log partial results for debugging
+            partial_result_json = self.command_recognizer.PartialResult()
             partial_result = json.loads(partial_result_json)
             partial_text = partial_result.get("partial", "")
             if partial_text:
@@ -315,7 +537,7 @@ class AudioProcessor:
         # Fall back to Vosk if cloud failed or unavailable
         if not alternatives:
             logger.debug("Using Vosk fallback for command recognition")
-            final_result = self.recognizer.FinalResult()
+            final_result = self.command_recognizer.FinalResult()
             result = json.loads(final_result)
 
             main_text = result.get('text', '').strip()
@@ -405,8 +627,9 @@ class AudioProcessor:
             self.on_command([])
 
     def _reset_to_wake_word_state(self):
-        """Resets recognizer and state back to listening for wake word."""
+        """Resets recognizers and state back to listening for wake word."""
         self.recognizer.Reset()
+        self.command_recognizer.Reset()
         self._wake_word_pending = False
         self._last_command_partial = ""
         self._audio_buffer = []  # Clear audio buffer

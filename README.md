@@ -19,7 +19,7 @@ This project creates a voice-controlled Tidal music player using a Raspberry Pi 
 6. Announces what will be played, then streams audio to Nest Mini via Chromecast
 7. For non-music commands, continue using "Ok Google" directly on Nest Mini
 
-**Note**: Wake word detection uses Vosk with a single full-model recognizer (fully offline). This allows saying wake word + command together naturally.
+**Note**: Wake word detection uses Vosk with constrained grammar mode (limited vocabulary) for improved accuracy. Command recognition uses Google Speech API for high accuracy with artist/song names. Both wake word + command can be said together naturally.
 
 ## 📋 Hardware Requirements
 
@@ -44,7 +44,11 @@ This project creates a voice-controlled Tidal music player using a Raspberry Pi 
 sudo apt update && sudo apt upgrade -y
 
 # Install system dependencies
-sudo apt install -y python3-pip python3-venv portaudio19-dev git
+sudo apt install -y python3-pip python3-venv portaudio19-dev git flac
+
+# Optional: Install espeak for local TTS (uses Google TTS by default)
+# Note: Requires symlink: sudo ln -sf /usr/lib/*/libespeak-ng.so.1 /usr/lib/libespeak.so.1
+# sudo apt install -y espeak-ng libespeak-ng1
 
 # Clone this repository
 git clone <your-repo-url>
@@ -300,20 +304,27 @@ Tidal tokens auto-refresh, but the refresh token expires (~30 days). When this h
 tidal-voice-assistant/
 ├── README.md                    # This file
 ├── CLAUDE.md                    # Context for Claude Code
+├── improvements.md              # Future improvement ideas
 ├── architecture.svg             # Architecture diagram
 ├── requirements.txt             # Python dependencies
 ├── .env.example                 # Environment variables template
 ├── config.py                    # Application configuration
 ├── main.py                      # Main application entry point
-├── audio_processor.py          # Centralized audio processing (wake word + commands)
+├── audio_processor.py          # Centralized audio processing (wake word + commands + VAD)
+├── cloud_recognizer.py         # Google Speech API integration
 ├── command_parser.py           # Parse Spanish music commands
 ├── phonetic_matcher.py         # Phonetic matching for fuzzy search
 ├── tidal_player.py             # Tidal API and Chromecast integration
 ├── tidal_auth.py               # Tidal authentication
+├── tts_engine.py               # TTS engine (local pyttsx3 or Google)
+├── utils.py                    # Utility functions and decorators
 ├── list_audio_devices.py       # List available audio input devices
 ├── test_chromecast.py          # Chromecast testing utilities
 ├── test_tidal.py               # Tidal integration testing
 ├── test_wake_word.py           # Wake word detection testing
+├── tests/                       # Unit tests (pytest)
+│   ├── test_command_parser.py
+│   └── test_phonetic_matcher.py
 ├── tidal-assistant.service     # Systemd service file
 └── vosk-model-small-es-0.42/   # Spanish speech recognition model (downloaded)
 ```
@@ -351,6 +362,32 @@ tidal-voice-assistant/
 - Check network bandwidth
 - Reduce WiFi interference
 
+### Microphone Sensitivity Issues
+If the wake word detection is unreliable:
+
+1. **Check microphone levels:**
+   ```bash
+   # List USB mic controls
+   amixer -c 2 scontrols
+
+   # Set mic to maximum
+   amixer -c 2 set 'Mic' 100%
+
+   # Disable Auto Gain Control (can reduce sensitivity)
+   amixer -c 2 set 'Auto Gain Control' off
+   ```
+
+2. **Enable software amplification** in `config.py`:
+   ```python
+   AUDIO_GAIN = 1.5  # Boost mic input (1.0 = no change, 2.0 = double)
+   ```
+
+3. **Verify correct microphone** is selected:
+   ```bash
+   python list_audio_devices.py
+   ```
+   Update `AUDIO_INPUT_DEVICE_INDEX` in `config.py` if needed.
+
 ### Python Dependencies Issues
 ```bash
 # Reinstall in clean environment
@@ -383,25 +420,34 @@ LOG_LEVEL=WARNING   # Only warnings and errors
 
 ## 🚧 Known Limitations
 
-- Wake word detection uses ~15-25% CPU (continuous Vosk transcription)
+- Wake word detection uses ~5-10% CPU (with VAD + grammar mode)
 - Detection latency: 200-500ms (vs <50ms with cloud-based solutions)
 - Requires good audio environment (low background noise)
 - Spanish speech recognition works best with clear pronunciation (Spain Spanish)
-- Network latency affects response time
-- Tidal API rate limits may apply
+- Network latency affects response time (Google Speech API for commands)
+- Tidal API rate limits may apply for heavy usage
 - Tidal refresh tokens expire (~30 days) - voice notification will alert you
+- Chromecast queue is lost during TTS (mitigated with internal queue tracking)
 
 ## 🛣️ Future Enhancements
 
 - [x] Fully offline wake word detection (no external APIs)
+- [x] Vosk grammar mode for improved wake word accuracy
+- [x] Hybrid speech recognition (Vosk wake word + Google commands)
 - [x] Autoplay/continuous playback (queues similar tracks)
-- [x] Full album and artist playback (queues all tracks)
-- [x] Playlist support
-- [x] Skip track functionality
+- [x] Full album and artist playback (queues all tracks, shuffled)
+- [x] Playlist support (with shuffle)
+- [x] Skip track functionality (with internal queue tracking)
+- [x] Voice Activity Detection (VAD) for CPU reduction
+- [x] Local TTS option (offline announcements)
+- [x] Search result caching
+- [x] Configurable wake word patterns
+- [x] Distinct audio cues (wake/success/error/timeout)
+- [x] Software audio gain for microphone sensitivity
+- [x] Unit tests
 - [ ] Volume control via voice
 - [ ] Multi-language support (Catalan, etc.)
 - [ ] Web interface for configuration
-- [ ] Better error handling and user feedback
 - [ ] Integration with Home Assistant
 
 ## 🌐 External API Dependencies

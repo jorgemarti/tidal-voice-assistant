@@ -2,7 +2,10 @@
 Parse Spanish voice commands for music playback
 """
 
+from typing import Optional, Dict, List
+
 import re
+
 
 class MusicCommandParser:
     """
@@ -22,10 +25,10 @@ class MusicCommandParser:
     - "reproduce el álbum [nombre]" → play album
     """
     
-    def __init__(self):
+    def __init__(self) -> None:
         # Patterns for different command types
         # These are ordered by specificity (most specific first)
-        self.patterns = {
+        self.patterns: Dict[str, List[str]] = {
             # Playback controls (check first - no query needed)
             'stop': [
                 r'^(para|detén|detente|stop|parar)$',
@@ -66,7 +69,7 @@ class MusicCommandParser:
             ],
         }
     
-    def parse(self, text):
+    def parse(self, text: Optional[str]) -> Optional[Dict[str, Optional[str]]]:
         """
         Parse voice command text into structured action.
 
@@ -75,10 +78,6 @@ class MusicCommandParser:
 
         Returns:
             dict with 'action' and 'query' keys, or None if no match
-            {
-                'action': 'play_song' | 'play_artist' | 'play_album',
-                'query': 'extracted search term'
-            }
         """
         if not text:
             return None
@@ -123,8 +122,8 @@ class MusicCommandParser:
 
         return None
     
-    def _clean_query(self, query):
-        """Clean up extracted query string"""
+    def _clean_query(self, query: str) -> str:
+        """Clean up extracted query string."""
         # Remove trailing articles and prepositions
         query = re.sub(r'\s+(de|por|del|la|el|los|las)$', '', query, flags=re.IGNORECASE)
         
@@ -133,12 +132,15 @@ class MusicCommandParser:
         
         return query.strip()
     
-    def get_search_type(self, action):
+    def get_search_type(self, action: str) -> str:
         """
         Convert action to Tidal search type.
-        
+
+        Args:
+            action: Action string from parse result
+
         Returns:
-            'track', 'artist', or 'album'
+            Search type: 'track', 'artist', 'album', or 'playlist'
         """
         mapping = {
             'play_song': 'track',

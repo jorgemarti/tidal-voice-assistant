@@ -9,16 +9,64 @@ import time
 import threading
 import random
 from phonetic_matcher import PhoneticMatcher
+from tts_engine import get_tts_engine
 from config import (
     CHROMECAST_NAME, TIDAL_CONFIG, setup_logging,
     RETRY_MAX_ATTEMPTS, RETRY_DELAY_SECONDS, RETRY_BACKOFF_MULTIPLIER,
-    AUTOPLAY_ENABLED, AUTOPLAY_TRACK_COUNT
+    AUTOPLAY_ENABLED, AUTOPLAY_TRACK_COUNT,
+    SEARCH_CACHE_ENABLED, SEARCH_CACHE_TTL, SEARCH_CACHE_MAX_SIZE,
+    TTS_SHORT_ANNOUNCEMENTS
 )
 
 logger = setup_logging(__name__)
 
-# URL for the activation sound
-ACTIVATION_SOUND_URL = "https://actions.google.com/sounds/v1/alarms/beep_short.ogg"
+
+class SearchCache:
+    """Simple TTL cache for Tidal search results."""
+
+    def __init__(self, ttl: int = 300, max_size: int = 50):
+        self.ttl = ttl
+        self.max_size = max_size
+        self._cache = {}  # key -> (timestamp, results)
+
+    def _make_key(self, query: str, search_type: str) -> str:
+        """Create cache key from query and search type."""
+        return f"{search_type}:{query.lower().strip()}"
+
+    def get(self, query: str, search_type: str):
+        """Get cached results if valid."""
+        key = self._make_key(query, search_type)
+        if key in self._cache:
+            timestamp, results = self._cache[key]
+            if time.time() - timestamp < self.ttl:
+                logger.debug(f"Cache hit for: {query}")
+                return results
+            else:
+                # Expired
+                del self._cache[key]
+        return None
+
+    def set(self, query: str, search_type: str, results):
+        """Store results in cache."""
+        # Evict oldest entries if cache is full
+        if len(self._cache) >= self.max_size:
+            oldest_key = min(self._cache.keys(), key=lambda k: self._cache[k][0])
+            del self._cache[oldest_key]
+
+        key = self._make_key(query, search_type)
+        self._cache[key] = (time.time(), results)
+        logger.debug(f"Cached results for: {query}")
+
+# Audio cue URLs (from Google Actions sound library)
+AUDIO_CUES = {
+    'wake': "https://actions.google.com/sounds/v1/alarms/beep_short.ogg",
+    'success': "https://actions.google.com/sounds/v1/cartoon/pop.ogg",
+    'error': "https://actions.google.com/sounds/v1/cartoon/clang_and_wobble.ogg",
+    'timeout': "https://actions.google.com/sounds/v1/cartoon/slide_whistle_to_drum.ogg",
+}
+
+# Backwards compatibility
+ACTIVATION_SOUND_URL = AUDIO_CUES['wake']
 
 class TidalPlayer:
     """
@@ -39,6 +87,20 @@ class TidalPlayer:
         self.browser = None  # Store browser for cleanup
         self.phonetic_matcher = PhoneticMatcher()
 
+        # Search cache
+        self._search_cache = None
+        if SEARCH_CACHE_ENABLED:
+            self._search_cache = SearchCache(ttl=SEARCH_CACHE_TTL, max_size=SEARCH_CACHE_MAX_SIZE)
+
+        # Track state for resume after TTS
+        self._current_track = None
+        self._paused_position = 0
+        self._was_paused_for_command = False
+
+        # Internal queue tracking (Chromecast queue is lost when TTS plays)
+        self._track_queue = []
+        self._queue_index = 0
+
         # Load Tidal session
         logger.info("Loading Tidal session...")
         self.session = load_tidal_session()
@@ -48,29 +110,42 @@ class TidalPlayer:
 
         logger.info("Tidal session loaded successfully")
 
+    def play_audio_cue(self, cue_type: str = 'wake'):
+        """
+        Play an audio cue on the Chromecast.
+
+        Args:
+            cue_type: Type of cue - 'wake', 'success', 'error', 'timeout'
+        """
+        if cue_type not in AUDIO_CUES:
+            logger.warning(f"Unknown audio cue type: {cue_type}")
+            cue_type = 'wake'
+
+        logger.debug(f"Playing audio cue: {cue_type}")
+        thread = threading.Thread(target=self._play_sound_async, args=(cue_type,))
+        thread.daemon = True
+        thread.start()
+
     def play_activation_sound(self):
         """
         Plays a short sound on the Chromecast to indicate the wake word was detected.
         Runs in a separate thread to be non-blocking.
         """
-        logger.debug("Playing activation sound")
-        thread = threading.Thread(target=self._play_sound_async)
-        thread.daemon = True
-        thread.start()
+        self.play_audio_cue('wake')
 
-    def _play_sound_async(self):
+    def _play_sound_async(self, cue_type: str = 'wake'):
         """Helper method to play sound without blocking."""
         try:
             if not self.cast_device and not self.find_chromecast():
-                logger.error("Cannot play activation sound: Chromecast not found")
+                logger.error("Cannot play audio cue: Chromecast not found")
                 return
 
-            self.media_controller.play_media(ACTIVATION_SOUND_URL, 'audio/ogg')
-            # Don't block here, just fire and forget
-            logger.debug("Activation sound sent to Chromecast")
+            sound_url = AUDIO_CUES.get(cue_type, AUDIO_CUES['wake'])
+            self.media_controller.play_media(sound_url, 'audio/ogg')
+            logger.debug(f"Audio cue '{cue_type}' sent to Chromecast")
 
         except Exception as e:
-            logger.error(f"Error playing activation sound: {e}")
+            logger.error(f"Error playing audio cue: {e}")
     
     def find_chromecast(self, retry=True):
         """
@@ -140,7 +215,7 @@ class TidalPlayer:
     
     def search_tidal(self, query, search_type='track', limit=5, retry=True):
         """
-        Search Tidal for music with retry support.
+        Search Tidal for music with retry and cache support.
 
         Args:
             query: Search query string
@@ -151,6 +226,12 @@ class TidalPlayer:
         Returns:
             List of search results or None
         """
+        # Check cache first
+        if self._search_cache:
+            cached = self._search_cache.get(query, search_type)
+            if cached is not None:
+                return cached
+
         max_attempts = RETRY_MAX_ATTEMPTS if retry else 1
         delay = RETRY_DELAY_SECONDS
 
@@ -160,22 +241,25 @@ class TidalPlayer:
                 search_result = self.session.search(query, limit=limit)
 
                 # tidalapi 0.8+ returns a dict with 'tracks', 'artists', 'albums' keys
+                results = None
                 if search_type == 'track' and search_result.get('tracks'):
-                    tracks = search_result['tracks']
-                    logger.debug(f"Found {len(tracks)} tracks")
-                    return tracks
+                    results = search_result['tracks']
+                    logger.debug(f"Found {len(results)} tracks")
                 elif search_type == 'artist' and search_result.get('artists'):
-                    artists = search_result['artists']
-                    logger.debug(f"Found {len(artists)} artists")
-                    return artists
+                    results = search_result['artists']
+                    logger.debug(f"Found {len(results)} artists")
                 elif search_type == 'album' and search_result.get('albums'):
-                    albums = search_result['albums']
-                    logger.debug(f"Found {len(albums)} albums")
-                    return albums
+                    results = search_result['albums']
+                    logger.debug(f"Found {len(results)} albums")
                 elif search_type == 'playlist' and search_result.get('playlists'):
-                    playlists = search_result['playlists']
-                    logger.debug(f"Found {len(playlists)} playlists")
-                    return playlists
+                    results = search_result['playlists']
+                    logger.debug(f"Found {len(results)} playlists")
+
+                if results:
+                    # Cache the results
+                    if self._search_cache:
+                        self._search_cache.set(query, search_type, results)
+                    return results
 
                 logger.warning(f"No {search_type} results found for: '{query}'")
                 return None
@@ -232,7 +316,16 @@ class TidalPlayer:
                 if not enqueue:
                     self.media_controller.block_until_active()
                     logger.info("Playback started successfully")
+                    # Store current track for resume capability
+                    self._current_track = track
+                    self._paused_position = 0
+                    self._was_paused_for_command = False
+                    # Start new internal queue with this track
+                    self._track_queue = [track]
+                    self._queue_index = 0
                 else:
+                    # Add to internal queue
+                    self._track_queue.append(track)
                     logger.debug(f"Track queued: {track.name}")
 
                 return True
@@ -275,7 +368,7 @@ class TidalPlayer:
 
             # Announce the first track
             first_track = top_tracks[0]
-            self.speak(f"Reproduciendo {first_track.name} de {artist.name}.")
+            self._announce_track(first_track)
 
             # Play first track, queue the rest
             for i, track in enumerate(top_tracks):
@@ -326,12 +419,13 @@ class TidalPlayer:
             logger.error(f"Error playing album: {e}")
             return False
 
-    def play_playlist(self, playlist):
+    def play_playlist(self, playlist, shuffle=True):
         """
         Play a playlist with all its tracks.
 
         Args:
             playlist: Tidal playlist object
+            shuffle: Randomize track order (default: True)
 
         Returns:
             True if successful, False otherwise
@@ -344,6 +438,12 @@ class TidalPlayer:
             if not tracks:
                 logger.warning("No tracks found in playlist")
                 return False
+
+            # Shuffle tracks for variety
+            tracks = list(tracks)
+            if shuffle:
+                random.shuffle(tracks)
+                logger.debug(f"Shuffled playlist tracks")
 
             logger.debug(f"Queueing {len(tracks)} tracks from playlist: {playlist.name}")
 
@@ -389,7 +489,10 @@ class TidalPlayer:
                     radio_tracks = track.get_track_radio(limit=AUTOPLAY_TRACK_COUNT)
 
                     if radio_tracks:
-                        logger.debug(f"Queueing {len(radio_tracks)} similar tracks")
+                        # Shuffle radio tracks for variety
+                        radio_tracks = list(radio_tracks)
+                        random.shuffle(radio_tracks)
+                        logger.debug(f"Queueing {len(radio_tracks)} shuffled similar tracks")
                         for radio_track in radio_tracks:
                             self.play_track(radio_track, enqueue=True)
                         logger.debug(f"Autoplay enabled with {len(radio_tracks)} tracks queued")
@@ -456,16 +559,16 @@ class TidalPlayer:
 
         # 3. Announce and play the best-matched item
         if search_type == 'track':
-            self.speak(f"Reproduciendo {best_match_object.name} de {best_match_object.artist.name}.")
+            self._announce_track(best_match_object)
             return self.play_track_with_autoplay(best_match_object)
         elif search_type == 'artist':
             # Announcement happens inside play_artist_top_tracks after selecting first track
             return self.play_artist_top_tracks(best_match_object)
         elif search_type == 'album':
-            self.speak(f"Reproduciendo el álbum {best_match_object.name} de {best_match_object.artist.name}.")
+            self._announce_album(best_match_object)
             return self.play_album(best_match_object)
         elif search_type == 'playlist':
-            self.speak(f"Reproduciendo la playlist {best_match_object.name}.")
+            self._announce_playlist(best_match_object)
             return self.play_playlist(best_match_object)
 
         return False
@@ -507,9 +610,32 @@ class TidalPlayer:
 
         return False
 
+    def _announce_track(self, track):
+        """Announce a track with optional short mode."""
+        if TTS_SHORT_ANNOUNCEMENTS:
+            self.speak(track.name)
+        else:
+            self.speak(f"Reproduciendo {track.name} de {track.artist.name}.")
+
+    def _announce_album(self, album):
+        """Announce an album with optional short mode."""
+        if TTS_SHORT_ANNOUNCEMENTS:
+            self.speak(album.name)
+        else:
+            self.speak(f"Reproduciendo el álbum {album.name} de {album.artist.name}.")
+
+    def _announce_playlist(self, playlist):
+        """Announce a playlist with optional short mode."""
+        if TTS_SHORT_ANNOUNCEMENTS:
+            self.speak(playlist.name)
+        else:
+            self.speak(f"Reproduciendo la playlist {playlist.name}.")
+
     def speak(self, message, lang='es', wait=True):
         """
-        Speak a message on the Chromecast using Google TTS.
+        Speak a message on the Chromecast using TTS engine.
+
+        Uses local TTS (pyttsx3) or Google TTS based on config.
 
         Args:
             message: Text to speak
@@ -521,8 +647,8 @@ class TidalPlayer:
             return False
 
         try:
-            import urllib.parse
-            tts_url = f"https://translate.google.com/translate_tts?ie=UTF-8&client=tw-ob&tl={lang}&q={urllib.parse.quote(message)}"
+            tts_engine = get_tts_engine()
+            tts_url = tts_engine.get_tts_url(message, lang)
 
             logger.debug(f"Speaking: {message}")
             self.media_controller.play_media(tts_url, 'audio/mp3')
@@ -582,6 +708,14 @@ class TidalPlayer:
 
     def stop(self):
         """Stop playback and clear queue"""
+        # Reset resume state
+        self._was_paused_for_command = False
+        self._current_track = None
+        self._paused_position = 0
+        # Clear internal queue
+        self._track_queue = []
+        self._queue_index = 0
+
         if self.media_controller:
             try:
                 # Stop current playback
@@ -608,22 +742,102 @@ class TidalPlayer:
                 logger.error(f"Error clearing queue: {e}")
 
     def pause(self):
-        """Pause playback"""
+        """Pause playback and store position for later resume."""
         if self.media_controller:
+            try:
+                # Get current position before pausing
+                self.media_controller.update_status()
+                status = self.media_controller.status
+                if status and status.current_time:
+                    self._paused_position = status.current_time
+                    logger.debug(f"Stored pause position: {self._paused_position:.1f}s")
+            except Exception as e:
+                logger.debug(f"Could not get pause position: {e}")
+                self._paused_position = 0
+
             self.media_controller.pause()
+            self._was_paused_for_command = True
             logger.info("Playback paused")
 
     def play(self):
-        """Resume playback"""
+        """Resume playback - re-starts track if TTS interrupted."""
+        if not self.cast_device:
+            logger.warning("Cannot resume: Chromecast not connected")
+            return False
+
+        # If we were paused for a command and have a track to resume,
+        # we need to re-start it because TTS replaced the media
+        if self._was_paused_for_command and self._current_track:
+            logger.debug(f"Re-starting track from {self._paused_position:.1f}s")
+            self._was_paused_for_command = False
+            try:
+                stream_url = self._current_track.get_url()
+                if stream_url:
+                    # Play and seek to position
+                    self.media_controller.play_media(
+                        stream_url,
+                        'audio/mp4',
+                        title=self._current_track.name,
+                        thumb=self._current_track.album.image(1280) if self._current_track.album else None,
+                        current_time=self._paused_position
+                    )
+                    logger.info(f"Playback resumed at {self._paused_position:.1f}s")
+                    return True
+                else:
+                    logger.error("Could not get stream URL for resume")
+                    return False
+            except Exception as e:
+                logger.error(f"Resume from position failed: {e}")
+                return False
+
+        # Standard resume (no TTS interruption)
         if self.media_controller:
-            self.media_controller.play()
-            logger.info("Playback resumed")
+            try:
+                self.media_controller.play()
+                logger.info("Playback resumed")
+                return True
+            except Exception as e:
+                logger.error(f"Resume failed: {e}")
+                return False
+        return False
 
     def skip(self):
-        """Skip to next track in queue"""
-        if self.media_controller:
-            self.media_controller.queue_next()
-            logger.info("Skipped to next track")
+        """Skip to next track in queue.
+
+        Uses internal queue tracking since Chromecast queue is lost after TTS.
+        """
+        self._was_paused_for_command = False
+        self._paused_position = 0
+
+        # Try to use internal queue (reliable after TTS interruption)
+        if self._track_queue and self._queue_index < len(self._track_queue) - 1:
+            self._queue_index += 1
+            next_track = self._track_queue[self._queue_index]
+            self._current_track = next_track
+            logger.info(f"Skipping to: {next_track.name}")
+
+            try:
+                stream_url = next_track.get_url()
+                if stream_url:
+                    self.media_controller.play_media(
+                        stream_url,
+                        'audio/mp4',
+                        title=next_track.name,
+                        thumb=next_track.album.image(1280) if next_track.album else None,
+                    )
+                    logger.info(f"Now playing: {next_track.name}")
+                    return True
+            except Exception as e:
+                logger.error(f"Skip failed: {e}")
+                return False
+        else:
+            # Fallback to Chromecast queue_next (may not work after TTS)
+            logger.debug("No more tracks in internal queue, trying Chromecast queue")
+            self._current_track = None
+            if self.media_controller:
+                self.media_controller.queue_next()
+                logger.info("Skipped to next track (Chromecast queue)")
+            return True
 
     def is_playing(self):
         """Check if music is currently playing or paused (active session)"""

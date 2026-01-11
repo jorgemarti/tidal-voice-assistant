@@ -6,7 +6,7 @@ Tidal Voice Assistant - Main Application (Refactored)
 from audio_processor import AudioProcessor
 from command_parser import MusicCommandParser
 from tidal_player import TidalPlayer
-from config import setup_logging
+from config import setup_logging, CHROMECAST_PRECONNECT
 import sys
 
 # Setup global logger
@@ -37,6 +37,7 @@ def on_wake_word_detected():
 def on_command_timeout():
     """Callback executed when command listening times out."""
     logger.warning("Command listening timed out.")
+    tidal_player.play_audio_cue('timeout')
     # Resume playback if it was paused for command listening
     tidal_player.play()
     
@@ -63,6 +64,7 @@ def on_command_received(alternatives):
 
     if not parsed:
         logger.warning("Could not understand music command from any alternative.")
+        tidal_player.play_audio_cue('error')
         tidal_player.speak("No entendí el comando.", wait=True)
         tidal_player.play()  # Resume if was paused
         return
@@ -80,8 +82,7 @@ def on_command_received(alternatives):
     elif action == 'resume':
         tidal_player.play()
     elif action == 'skip':
-        tidal_player.skip()
-        tidal_player.play()  # Resume after skipping (was paused for command)
+        tidal_player.skip()  # skip() handles playback of next track internally
     else:
         # It's a music search command
         # Stop current playback first so TTS announcement can be heard
@@ -102,15 +103,23 @@ def main():
     print_banner()
 
     try:
+        # Pre-connect to Chromecast if enabled (reduces first-command latency)
+        if CHROMECAST_PRECONNECT:
+            logger.info("Pre-connecting to Chromecast...")
+            if tidal_player.find_chromecast():
+                logger.info(f"Chromecast ready: {tidal_player.cast_device.name}")
+            else:
+                logger.warning("Chromecast pre-connect failed. Will retry on first command.")
+
         logger.info("Initializing audio processor...")
-        
+
         # The AudioProcessor now orchestrates everything
         audio_processor = AudioProcessor(
             on_wake_word=on_wake_word_detected,
             on_command=on_command_received,
             on_timeout=on_command_timeout
         )
-        
+
         logger.info("Initialization complete. Starting main loop...")
         
         # This is a blocking call that runs until KeyboardInterrupt
