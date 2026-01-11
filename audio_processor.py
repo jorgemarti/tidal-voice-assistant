@@ -153,16 +153,17 @@ class AudioProcessor:
             else:
                 logger.debug("Using energy-based VAD (webrtcvad not installed)")
 
-        # Audio Stream
-        self.audio = pyaudio.PyAudio()
-        self.stream = self.audio.open(
-            rate=SAMPLE_RATE,
-            channels=1,
-            format=pyaudio.paInt16,
-            input=True,
-            frames_per_buffer=CHUNK_SIZE,
-            input_device_index=AUDIO_INPUT_DEVICE_INDEX
-        )
+        # Audio Stream - suppress ALSA/JACK warnings during initialization
+        with suppress_stderr():
+            self.audio = pyaudio.PyAudio()
+            self.stream = self.audio.open(
+                rate=SAMPLE_RATE,
+                channels=1,
+                format=pyaudio.paInt16,
+                input=True,
+                frames_per_buffer=CHUNK_SIZE,
+                input_device_index=AUDIO_INPUT_DEVICE_INDEX
+            )
         logger.debug("Audio stream opened.")
 
     def run(self):

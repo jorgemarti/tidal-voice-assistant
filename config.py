@@ -95,7 +95,7 @@ VAD_ENABLED = True  # Enable VAD to reduce CPU from ~20% to ~5%
 VAD_AGGRESSIVENESS = 2  # 0-3, higher = more aggressive filtering (fewer false positives)
 
 # TTS Configuration
-TTS_ENGINE = 'local'  # Options: 'local' (pyttsx3, offline), 'google' (Google Translate TTS)
+TTS_ENGINE = 'google'  # Options: 'google' (Google Translate TTS), 'local' (pyttsx3, offline)
 TTS_LOCAL_RATE = 175  # Speech rate for local TTS (words per minute)
 TTS_LOCAL_VOICE = None  # None = system default, or specify voice name
 TTS_SHORT_ANNOUNCEMENTS = False  # If True, use brief announcements (just track name)
