@@ -136,10 +136,20 @@ class AudioProcessor:
         self._recent_partials = []
         self._partial_window_size = 8  # Keep last N partials for better coverage
 
-        # Vosk recognizer for wake word detection
-        # Also used as fallback for commands if cloud is unavailable
-        self.recognizer = KaldiRecognizer(self.model, SAMPLE_RATE)
+        # Build grammar for wake word detection (limited vocabulary mode)
+        # This dramatically improves accuracy by constraining recognition
+        # Include [unk] to handle non-wake-word speech without force-matching
+        wake_word_grammar = self._build_wake_word_grammar()
+        logger.debug(f"Wake word grammar: {wake_word_grammar}")
+
+        # Vosk recognizer for wake word detection with constrained grammar
+        # Using limited vocabulary mode for better accuracy
+        self.recognizer = KaldiRecognizer(self.model, SAMPLE_RATE, wake_word_grammar)
         self.recognizer.SetMaxAlternatives(5)
+
+        # Full vocabulary recognizer for command fallback (if cloud unavailable)
+        self.command_recognizer = KaldiRecognizer(self.model, SAMPLE_RATE)
+        self.command_recognizer.SetMaxAlternatives(5)
 
         # Voice Activity Detection (VAD) - reduces CPU by skipping silence
         self.vad_enabled = VAD_ENABLED
@@ -203,6 +213,56 @@ class AudioProcessor:
             logger.info("Audio processing loop interrupted.")
         finally:
             self.cleanup()
+
+    def _build_wake_word_grammar(self) -> str:
+        """
+        Build a JSON grammar string for constrained wake word recognition.
+
+        Using limited vocabulary mode dramatically improves accuracy:
+        - Vosk only tries to match these specific phrases
+        - [unk] handles non-wake-word speech without force-matching
+        - Reduces false positives and improves true positive rate
+
+        Returns:
+            JSON string array of wake phrases for Vosk grammar
+        """
+        # Comprehensive wake word variations
+        # Include phonetic variations that Vosk might hear
+        grammar_phrases = [
+            # Standard forms
+            "okay musica",
+            "okey musica",
+            "ok musica",
+            "oque musica",
+            # With "y" filler
+            "okay y musica",
+            "okey y musica",
+            # Musical variant
+            "okay musical",
+            "okey musical",
+            "ok musical",
+            # Misrecognition variants
+            "okay muchas",
+            "okey muchas",
+            "okay muy sica",
+            "okey muy sica",
+            "okay mi sica",
+            "okey mi sica",
+            # Split variants (Vosk sometimes splits words)
+            "okay",
+            "okey",
+            "musica",
+            "musical",
+            # Unknown token for non-wake-word speech
+            "[unk]",
+        ]
+
+        # Add configured wake words from config
+        for phrase in self.wake_phrases:
+            if phrase not in grammar_phrases:
+                grammar_phrases.insert(0, phrase)
+
+        return json.dumps(grammar_phrases)
 
     def _is_wake_word_match(self, text):
         """
@@ -437,14 +497,14 @@ class AudioProcessor:
             self._reset_to_wake_word_state()
             return
 
-        # Use Vosk to detect end of speech (but not for transcription)
-        if self.recognizer.AcceptWaveform(data):
+        # Use full vocabulary recognizer to detect end of speech and for fallback transcription
+        if self.command_recognizer.AcceptWaveform(data):
             logger.debug("Vosk detected end of speech")
             self._finalize_command_recognition()
             self._reset_to_wake_word_state()
         else:
-            # Log partial results for debugging (Vosk still processes for speech detection)
-            partial_result_json = self.recognizer.PartialResult()
+            # Log partial results for debugging
+            partial_result_json = self.command_recognizer.PartialResult()
             partial_result = json.loads(partial_result_json)
             partial_text = partial_result.get("partial", "")
             if partial_text:
@@ -477,7 +537,7 @@ class AudioProcessor:
         # Fall back to Vosk if cloud failed or unavailable
         if not alternatives:
             logger.debug("Using Vosk fallback for command recognition")
-            final_result = self.recognizer.FinalResult()
+            final_result = self.command_recognizer.FinalResult()
             result = json.loads(final_result)
 
             main_text = result.get('text', '').strip()
@@ -567,8 +627,9 @@ class AudioProcessor:
             self.on_command([])
 
     def _reset_to_wake_word_state(self):
-        """Resets recognizer and state back to listening for wake word."""
+        """Resets recognizers and state back to listening for wake word."""
         self.recognizer.Reset()
+        self.command_recognizer.Reset()
         self._wake_word_pending = False
         self._last_command_partial = ""
         self._audio_buffer = []  # Clear audio buffer
