@@ -134,7 +134,7 @@ class AudioProcessor:
 
         # Sliding window for partial results (to catch split wake words)
         self._recent_partials = []
-        self._partial_window_size = 5  # Keep last N partials
+        self._partial_window_size = 8  # Keep last N partials for better coverage
 
         # Vosk recognizer for wake word detection
         # Also used as fallback for commands if cloud is unavailable
@@ -146,7 +146,7 @@ class AudioProcessor:
         self.vad = None
         self._silence_frames = 0
         self._speech_frames = 0
-        self._vad_threshold = 500  # RMS threshold for energy-based VAD
+        self._vad_threshold = 300  # RMS threshold for energy-based VAD (lower = more sensitive)
 
         if self.vad_enabled:
             if WEBRTCVAD_AVAILABLE:
@@ -220,9 +220,20 @@ class AudioProcessor:
         if WAKE_WORD_PATTERN:
             pattern = WAKE_WORD_PATTERN
         else:
-            # Default: ok/okay/okey/okei/oque + musica/música/musical
-            # Also accepts common Vosk misrecognitions: "muy sica", "muisica", etc.
-            pattern = r'\b(o[kq](?:a?y|e[iy]|ue)?)\s*(m[uú](?:y\s*)?(?:sica?l?|isica))\b'
+            # Default: ok/okay/okey + optional filler words + musica/música/musical
+            # Accepts common Vosk misrecognitions:
+            # - "okay y música" (adds "y")
+            # - "okay muchas" (mishears música)
+            # - "muy sica", "muisica", "mi sica"
+            # - "hokey", "a key" (prefix variations)
+            # - "okeymusica" (joined without space)
+            # Flexible pattern:
+            # - Optional prefix: a, ha, h (for "a-kay", "hokey")
+            # - Core: ok/oq + optional y/ey/ei/ue suffix
+            # - Optional space (or joined)
+            # - Optional filler: y, a, de
+            # - música variants: musica, musical, muchas, muisica, muy sica, mi sica
+            pattern = r'\b(?:a|ha?)?o[kq](?:a?y|e[iy]|ue)?\s*(?:y\s+|a\s+|de\s+)?(m[uú](?:y\s*|i\s*)?(?:sica?l?|chas?|isica))\b'
         match = re.search(pattern, text_lower)
 
         if match:

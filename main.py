@@ -82,8 +82,7 @@ def on_command_received(alternatives):
     elif action == 'resume':
         tidal_player.play()
     elif action == 'skip':
-        tidal_player.skip()
-        tidal_player.play()  # Resume after skipping (was paused for command)
+        tidal_player.skip()  # skip() handles playback of next track internally
     else:
         # It's a music search command
         # Stop current playback first so TTS announcement can be heard

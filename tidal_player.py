@@ -97,6 +97,10 @@ class TidalPlayer:
         self._paused_position = 0
         self._was_paused_for_command = False
 
+        # Internal queue tracking (Chromecast queue is lost when TTS plays)
+        self._track_queue = []
+        self._queue_index = 0
+
         # Load Tidal session
         logger.info("Loading Tidal session...")
         self.session = load_tidal_session()
@@ -316,7 +320,12 @@ class TidalPlayer:
                     self._current_track = track
                     self._paused_position = 0
                     self._was_paused_for_command = False
+                    # Start new internal queue with this track
+                    self._track_queue = [track]
+                    self._queue_index = 0
                 else:
+                    # Add to internal queue
+                    self._track_queue.append(track)
                     logger.debug(f"Track queued: {track.name}")
 
                 return True
@@ -410,12 +419,13 @@ class TidalPlayer:
             logger.error(f"Error playing album: {e}")
             return False
 
-    def play_playlist(self, playlist):
+    def play_playlist(self, playlist, shuffle=True):
         """
         Play a playlist with all its tracks.
 
         Args:
             playlist: Tidal playlist object
+            shuffle: Randomize track order (default: True)
 
         Returns:
             True if successful, False otherwise
@@ -428,6 +438,12 @@ class TidalPlayer:
             if not tracks:
                 logger.warning("No tracks found in playlist")
                 return False
+
+            # Shuffle tracks for variety
+            tracks = list(tracks)
+            if shuffle:
+                random.shuffle(tracks)
+                logger.debug(f"Shuffled playlist tracks")
 
             logger.debug(f"Queueing {len(tracks)} tracks from playlist: {playlist.name}")
 
@@ -473,7 +489,10 @@ class TidalPlayer:
                     radio_tracks = track.get_track_radio(limit=AUTOPLAY_TRACK_COUNT)
 
                     if radio_tracks:
-                        logger.debug(f"Queueing {len(radio_tracks)} similar tracks")
+                        # Shuffle radio tracks for variety
+                        radio_tracks = list(radio_tracks)
+                        random.shuffle(radio_tracks)
+                        logger.debug(f"Queueing {len(radio_tracks)} shuffled similar tracks")
                         for radio_track in radio_tracks:
                             self.play_track(radio_track, enqueue=True)
                         logger.debug(f"Autoplay enabled with {len(radio_tracks)} tracks queued")
@@ -693,6 +712,9 @@ class TidalPlayer:
         self._was_paused_for_command = False
         self._current_track = None
         self._paused_position = 0
+        # Clear internal queue
+        self._track_queue = []
+        self._queue_index = 0
 
         if self.media_controller:
             try:
@@ -780,10 +802,42 @@ class TidalPlayer:
         return False
 
     def skip(self):
-        """Skip to next track in queue"""
-        if self.media_controller:
-            self.media_controller.queue_next()
-            logger.info("Skipped to next track")
+        """Skip to next track in queue.
+
+        Uses internal queue tracking since Chromecast queue is lost after TTS.
+        """
+        self._was_paused_for_command = False
+        self._paused_position = 0
+
+        # Try to use internal queue (reliable after TTS interruption)
+        if self._track_queue and self._queue_index < len(self._track_queue) - 1:
+            self._queue_index += 1
+            next_track = self._track_queue[self._queue_index]
+            self._current_track = next_track
+            logger.info(f"Skipping to: {next_track.name}")
+
+            try:
+                stream_url = next_track.get_url()
+                if stream_url:
+                    self.media_controller.play_media(
+                        stream_url,
+                        'audio/mp4',
+                        title=next_track.name,
+                        thumb=next_track.album.image(1280) if next_track.album else None,
+                    )
+                    logger.info(f"Now playing: {next_track.name}")
+                    return True
+            except Exception as e:
+                logger.error(f"Skip failed: {e}")
+                return False
+        else:
+            # Fallback to Chromecast queue_next (may not work after TTS)
+            logger.debug("No more tracks in internal queue, trying Chromecast queue")
+            self._current_track = None
+            if self.media_controller:
+                self.media_controller.queue_next()
+                logger.info("Skipped to next track (Chromecast queue)")
+            return True
 
     def is_playing(self):
         """Check if music is currently playing or paused (active session)"""
