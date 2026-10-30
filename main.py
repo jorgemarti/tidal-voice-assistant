@@ -63,11 +63,31 @@ def on_command_timeout():
 WAKE_RE = re.compile(r"\b(ok|okay|okey|oye)\s+m[uú]sica\b", re.IGNORECASE)
 
 
+WAKE_NOISE_WORDS = {"ok", "okay", "okey", "oye", "o", "aunque", "hemos", "música", "musica", "musical", "muy", "sica", "y", "e"}
+
+
+def _after_wake(text):
+    """The text with the wake phrase and Vosk's usual renderings of it removed from the front."""
+    rest = WAKE_RE.sub(' ', text or '')
+    rest = re.sub(r"[^\wáéíóúüñ]+", ' ', rest, flags=re.IGNORECASE).strip().lower()
+    toks = rest.split()
+    while toks and toks[0] in WAKE_NOISE_WORDS:
+        toks.pop(0)
+    return ' '.join(toks)
+
+
+def _control_from(text):
+    """A stop/pause/resume/skip command found by the regex parser in a transcript, or None."""
+    rest = _after_wake(text)
+    if not rest:
+        return None
+    local = command_parser.parse(rest)
+    return local if local and local['action'] in ('stop', 'pause', 'resume', 'skip') else None
+
+
 def _is_wake_or_stub(text):
     """True when Gemini heard nothing beyond the wake phrase or a single word."""
-    rest = WAKE_RE.sub(' ', text or '')
-    rest = re.sub(r"[^\wáéíóúüñ]+", ' ', rest, flags=re.IGNORECASE).strip()
-    return len(rest.split()) <= 1
+    return len(_after_wake(text).split()) <= 1
 
 
 def on_command_received(command):
@@ -82,10 +102,10 @@ def on_command_received(command):
         if parsed and parsed['action'] == 'unknown':
             heard = parsed.get('transcript') or ''
             logger.info(f"Gemini heard no music command: '{heard}'")
-            local = command_parser.parse((command.get('transcript') or '').strip())
-            if local and local['action'] in ('stop', 'pause', 'resume', 'skip'):
-                # Gemini missed a short control word that Vosk caught ("para" after the cue)
-                logger.info(f"Using local control command '{local['action']}' from '{command.get('transcript')}'")
+            local = _control_from(heard) or _control_from(command.get('transcript'))
+            if local:
+                # Gemini missed a short control word ("okey música para" transcribed but not parsed, or caught only by Vosk)
+                logger.info(f"Using control command '{local['action']}' from the transcript")
                 parsed = local
             elif _is_wake_or_stub(heard):
                 if not command.get('reprompted'):

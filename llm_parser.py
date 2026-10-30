@@ -94,6 +94,37 @@ class LLMCommandParser:
         logger.info(f"Gemini request {hour + 1} this hour, {len(self._requests)} today")
         return True
 
+    @staticmethod
+    def _norm(text: str) -> str:
+        import unicodedata
+        return "".join(c for c in unicodedata.normalize("NFKD", text or "") if not unicodedata.combining(c)).lower()
+
+    def _ground_artist(self, data: dict, action: str) -> dict:
+        """Drop an artist the model did not hear.
+
+        The known-artists list makes the model attribute unrelated titles to a family favourite
+        ("reproduce patufet" became play_artist El Pot Petit). If the artist's words do not appear in
+        the model's own literal transcript, the artist is removed and an artist action becomes a song search.
+        """
+        artist, transcript = data.get("artist"), data.get("transcript") or ""
+        if not artist or not transcript:
+            return data
+        words = [w for w in self._norm(artist).split() if len(w) > 2]
+        t = self._norm(transcript)
+        if words and not any(w in t for w in words):
+            logger.info(f"Artist '{artist}' not heard in '{transcript}': dropping it")
+            data = dict(data, artist=None)
+            if action == "play_artist":
+                query = data.get("query") or ""
+                heard = self._norm(query)
+                if not heard or not any(w in t for w in heard.split() if len(w) > 2):
+                    # The query was the invented artist too: search what was actually said
+                    import re
+                    said = re.sub(r"^(reproduce|pon|ponme|escuchar|quiero escuchar|pon música de|reproduce música de)\s+", "", transcript.strip(), flags=re.IGNORECASE)
+                    data["query"] = said
+                data["action"] = "play_song"
+        return data
+
     def parse(self, command: dict) -> Optional[dict]:
         if not self.client or not self._within_budget():
             return None
@@ -128,6 +159,8 @@ class LLMCommandParser:
             logger.error(f"Gemini parse failed after {time.time() - t0:.1f}s: {e}")
             return None
         logger.info(f"Gemini ({time.time() - t0:.1f}s): {data}")
+        action = data.get("action") if data.get("action") in ACTIONS else "unknown"
+        data = self._ground_artist(data, action)
         action = data.get("action") if data.get("action") in ACTIONS else "unknown"
         # 'unknown' is an answer (the model heard it and it is not a music command), not a failure
         alts = [a for a in (data.get("artist_alternatives") or []) if isinstance(a, str) and a]
