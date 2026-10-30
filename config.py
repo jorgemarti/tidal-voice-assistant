@@ -114,6 +114,8 @@ SAMPLE_RATE = 16000
 COMMAND_PARSER = 'gemini'  # 'gemini' or 'regex'
 GEMINI_MODEL = 'gemini-3.5-flash-lite'
 GEMINI_USE_AUDIO = True  # Send the command audio to Gemini; False sends only the Vosk transcript
+GEMINI_MAX_PER_HOUR = 40   # Hard caps on Gemini requests: a runaway of false wake triggers cannot drain the prepaid balance
+GEMINI_MAX_PER_DAY = 300
 # Artists the household asks for often. Sent to Gemini together with the Tidal favourites so it
 # recognises them in the audio (e.g. "Dàmaris Gelabert" was heard as "Els Amics de les Arts").
 KNOWN_ARTISTS = ['Dàmaris Gelabert', 'The Strokes', 'Queen', 'Rosalía', 'Manel', 'Dani Miquel', 'El Pot Petit']

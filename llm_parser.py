@@ -11,7 +11,7 @@ import wave
 from typing import Optional
 
 import glob
-from config import GEMINI_MODEL, GEMINI_USE_AUDIO, KNOWN_ARTISTS, setup_logging
+from config import GEMINI_MODEL, GEMINI_USE_AUDIO, GEMINI_MAX_PER_HOUR, GEMINI_MAX_PER_DAY, KNOWN_ARTISTS, setup_logging
 
 logger = setup_logging(__name__)
 
@@ -46,6 +46,7 @@ class LLMCommandParser:
     def __init__(self, known_artists=None):
         self.client = None
         self.known_artists = list(dict.fromkeys(list(KNOWN_ARTISTS) + list(known_artists or [])))
+        self._requests = []  # timestamps of the requests made, for the hourly and daily caps
         key = os.environ.get("GEMINI_API_KEY")
         if not key:
             logger.warning("GEMINI_API_KEY not set, LLM parser disabled")
@@ -82,8 +83,19 @@ class LLMCommandParser:
         except OSError:
             pass
 
+    def _within_budget(self) -> bool:
+        now = time.time()
+        self._requests = [t for t in self._requests if now - t < 86400]
+        hour = sum(1 for t in self._requests if now - t < 3600)
+        if hour >= GEMINI_MAX_PER_HOUR or len(self._requests) >= GEMINI_MAX_PER_DAY:
+            logger.warning(f"Gemini request cap reached ({hour} this hour, {len(self._requests)} today): command not sent")
+            return False
+        self._requests.append(now)
+        logger.info(f"Gemini request {hour + 1} this hour, {len(self._requests)} today")
+        return True
+
     def parse(self, command: dict) -> Optional[dict]:
-        if not self.client:
+        if not self.client or not self._within_budget():
             return None
         from google.genai import types
         contents = [PROMPT]

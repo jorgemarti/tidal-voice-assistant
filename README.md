@@ -378,6 +378,9 @@ tidal-voice-assistant/
 - Run `python main.py` with `LOG_LEVEL=DEBUG` and watch the log
 - Speak clearly: "Okey música" (Vosk grammar mode only accepts the phrases in `WAKE_WORDS`)
 
+### Assistant triggers during normal conversation
+Vosk in grammar mode sometimes guesses the wake phrase for the first syllables of a sentence. Two defences are on by default: the hypothesis must hold for 300 ms, and the last 2.5 s are re-decoded with a fresh recognizer that must find the phrase again. Every trigger saves `wake-HHMMSS.wav` under `/tmp/tidal-commands`, so false triggers can be replayed offline. Gemini requests are capped (`GEMINI_MAX_PER_HOUR`, `GEMINI_MAX_PER_DAY` in `config.py`), and a false trigger stays silent unless `SPEAK_NOT_UNDERSTOOD` is enabled.
+
 ### Command Not Understood
 - Verify the Spanish model is downloaded to `vosk-model-small-es-0.42/`
 - Check that `GEMINI_API_KEY` is set in `.env`: the log shows `LLM parser ready` at startup, or `GEMINI_API_KEY not set, LLM parser disabled`

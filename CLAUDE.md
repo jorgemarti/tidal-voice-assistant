@@ -84,6 +84,8 @@ For a detailed visual representation of the system architecture, see [architectu
 - **Callbacks**: `on_wake_word()`, `on_prompt()`, `on_command({'audio', 'transcript', 'sample_rate', 'reprompted'})`, `on_timeout()`.
 - **Backlog drain**: after each handled command, the audio queued in the `arecord` pipe meanwhile (TTS, cues) is dropped, so the speaker cannot trigger the wake word
 
+- **False-trigger defences** (added 2026-10-30 evening after the assistant fired on ordinary conversation): the grammar hypothesis must hold for `WAKE_STABLE_CHUNKS` (300 ms), and then the last `WAKE_CONFIRM_SECONDS` (2.5 s) are re-decoded with a fresh grammar recognizer which must also find the phrase (cold decodes found it in 6 of 6 real wakes and 0 of 6 false ones). Every streaming trigger saves `wake-HHMMSS.wav` for offline tuning. Gemini requests are capped by `GEMINI_MAX_PER_HOUR` and `GEMINI_MAX_PER_DAY` so a runaway cannot drain the prepaid balance, and `SPEAK_NOT_UNDERSTOOD` keeps a false trigger silent.
+
 ### 1.1 LLM Parser (`llm_parser.py`)
 - Sends only the command audio (WAV) to Google Gemini (`GEMINI_MODEL` `gemini-3.5-flash-lite`, `GEMINI_USE_AUDIO` True, thinking level minimal, JSON response). The local Vosk transcript is deliberately not sent in audio mode: it biased the model towards its own mistakes (for example "strauss" for The Strokes). With `GEMINI_USE_AUDIO = False` only the transcript is sent.
 - The prompt tells Gemini to keep titles and names in the language heard (Catalan, English, Portuguese), never to translate, never to add an artist it did not hear, and to answer `play_artist` for a bare artist name. `KNOWN_ARTISTS` (config) plus the Tidal favourite artists are sent only as a spelling aid.

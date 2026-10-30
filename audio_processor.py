@@ -47,6 +47,7 @@ DEBUG_WAV_KEEP = 20         # wake-*.wav and timeout-*.wav kept per kind (/tmp i
 SPEECH_RMS_MIN = 350        # Absolute RMS floor for speech energy (16-bit samples)
 SPEECH_RMS_RATIO = 2.5      # Speech must be this many times the tracked noise floor
 END_SILENCE_SECONDS = 0.9   # Speech energy gone this long: the utterance is over
+WAKE_CONFIRM_SECONDS = 2.5  # On a streaming trigger, re-decode this much audio with a fresh recognizer and require the phrase again
 WAKE_STABLE_CHUNKS = 3      # The wake hypothesis must survive this many 100 ms chunks (grammar mode first guesses are often wrong)
 WAKE_TAIL_SECONDS = 0.6     # Energy this soon after the wake detection is the tail of "música", not the command
 
@@ -63,6 +64,7 @@ class AudioProcessor:
         logger.info(f"Loading Vosk model from {VOSK_MODEL_PATH}")
         self.model = Model(VOSK_MODEL_PATH)
         grammar = json.dumps(list(WAKE_WORDS) + ["[unk]"], ensure_ascii=False)
+        self.grammar = grammar
         self.wake_rec = KaldiRecognizer(self.model, SAMPLE_RATE, grammar)
         self.full_rec = KaldiRecognizer(self.model, SAMPLE_RATE)
         self.wake_phrases = [w.lower() for w in WAKE_WORDS]
@@ -95,6 +97,27 @@ class AudioProcessor:
         if self.wake_rec.AcceptWaveform(chunk):
             return json.loads(self.wake_rec.Result()).get("text", ""), True
         return json.loads(self.wake_rec.PartialResult()).get("partial", ""), False
+
+    def _confirm_wake(self) -> bool:
+        """Re-decode the last WAKE_CONFIRM_SECONDS with a fresh grammar recognizer.
+
+        The streaming recognizer carries state from the conversation before, and its hypothesis for a
+        new segment is sometimes a wake phrase that a cold decode of the same audio never produces.
+        On the day this was added, a cold decode found the phrase in 6 of 6 real wakes and 0 of 6 false ones.
+        """
+        audio = self._audio_since(int(WAKE_CONFIRM_SECONDS * 1000 / CHUNK_MS))
+        rec = KaldiRecognizer(self.model, SAMPLE_RATE, self.grammar)
+        texts = []
+        for i in range(0, len(audio), CHUNK_BYTES):
+            if rec.AcceptWaveform(audio[i:i + CHUNK_BYTES]):
+                texts.append(json.loads(rec.Result()).get("text", ""))
+            else:
+                texts.append(json.loads(rec.PartialResult()).get("partial", ""))
+        texts.append(json.loads(rec.FinalResult()).get("text", ""))
+        heard = [t for t in texts if t]
+        ok = any(any(phrase in t for phrase in self.wake_phrases) for t in heard)
+        logger.debug(f"Wake re-decode {'confirmed' if ok else 'REJECTED'}: {sorted(set(heard))[-3:]}")
+        return ok
 
     def _wake_in(self, text: str) -> bool:
         """The hypothesis is a wake phrase, possibly followed by [unk] (the user kept talking).
@@ -149,10 +172,12 @@ class AudioProcessor:
                 text, final = self._wake_text(chunk)
                 streak = streak + 1 if self._wake_in(text) else 0
                 if streak >= WAKE_STABLE_CHUNKS or (final and streak):
-                    logger.info(f"Wake word detected: '{text}' (stable {streak} chunks{', final' if final else ''})")
-                    self._dump_wav(self._audio_since(int(2500 / CHUNK_MS)), "wake")
                     streak = 0
                     self.wake_rec.Reset()
+                    self._dump_wav(self._audio_since(int(2500 / CHUNK_MS)), "wake")
+                    if not self._confirm_wake():
+                        continue
+                    logger.info(f"Wake word detected: '{text}'")
                     result = self._capture_command()
                     if result != "reprompt":
                         # Everything heard while the command was handled (TTS announcement, cue) is
