@@ -7,7 +7,7 @@ from audio_processor import AudioProcessor
 from command_parser import MusicCommandParser
 from tidal_player import TidalPlayer
 from llm_parser import LLMCommandParser
-from config import setup_logging, CHROMECAST_PRECONNECT, COMMAND_PARSER, PLAYBACK_CUES, VERSION
+from config import setup_logging, CHROMECAST_PRECONNECT, COMMAND_PARSER, PLAYBACK_CUES, SPEAK_NOT_UNDERSTOOD, VERSION
 import re
 import sys
 
@@ -108,8 +108,9 @@ def on_command_received(command):
 
     if not parsed:
         logger.warning(f"Could not understand command (transcript: '{command.get('transcript')}')")
-        # No cue here: a cue and TTS back to back race on the Chromecast socket
-        tidal_player.speak("No te he entendido.", wait=True)
+        if SPEAK_NOT_UNDERSTOOD:
+            # No cue here: a cue and TTS back to back race on the Chromecast socket
+            tidal_player.speak("No te he entendido.", wait=True)
         resume_if_needed()
         return
 

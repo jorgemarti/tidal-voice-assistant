@@ -77,7 +77,7 @@ class LLMCommandParser:
             os.makedirs(COMMAND_WAV_DIR, exist_ok=True)
             with open(os.path.join(COMMAND_WAV_DIR, time.strftime("%Y%m%d-%H%M%S") + ".wav"), "wb") as f:
                 f.write(wav)
-            for old in sorted(glob.glob(os.path.join(COMMAND_WAV_DIR, "*.wav")))[:-COMMAND_WAV_KEEP]:
+            for old in sorted(glob.glob(os.path.join(COMMAND_WAV_DIR, "2*.wav")))[:-COMMAND_WAV_KEEP]:  # own files only
                 os.remove(old)
         except OSError:
             pass

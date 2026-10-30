@@ -125,6 +125,7 @@ TTS_LOCAL_VOICE = None  # None = system default, or specify voice name
 TTS_SHORT_ANNOUNCEMENTS = False  # If True, use brief announcements (just track name)
 TTS_ANNOUNCE_PLAYBACK = False  # Say "Reproduciendo X de Y" before the music starts (adds ~7 s). The music itself is the feedback.
 PLAYBACK_CUES = False  # Play the timeout/error cues on the speaker (the wake cue after a pause is always played)
+SPEAK_NOT_UNDERSTOOD = False  # Say "No te he entendido" when a command is not a music command. Off: a false wake trigger during a conversation stays silent.
 
 # Last.fm scrobbling of what the speaker plays (needs LASTFM_API_KEY/LASTFM_API_SECRET in .env and `python lastfm_auth.py` once)
 LASTFM_SCROBBLE = True

@@ -43,9 +43,11 @@ WAKE_ONLY_SECONDS = 1.8     # A short final this soon after the wake word is pro
 EARLY_PROMPT_SECONDS = 1.2  # Cue the user this long after the wake word if nothing else was heard
 LEFTOVER_WAIT_SECONDS = 2.5 # After the cue, how long to wait before sending a short pre-cue text as the command
 DEBUG_WAV_DIR = "/tmp/tidal-commands"
+DEBUG_WAV_KEEP = 20         # wake-*.wav and timeout-*.wav kept per kind (/tmp is a 512 MB tmpfs on the Pi)
 SPEECH_RMS_MIN = 350        # Absolute RMS floor for speech energy (16-bit samples)
 SPEECH_RMS_RATIO = 2.5      # Speech must be this many times the tracked noise floor
 END_SILENCE_SECONDS = 0.9   # Speech energy gone this long: the utterance is over
+WAKE_STABLE_CHUNKS = 3      # The wake hypothesis must survive this many 100 ms chunks (grammar mode first guesses are often wrong)
 WAKE_TAIL_SECONDS = 0.6     # Energy this soon after the wake detection is the tail of "música", not the command
 
 
@@ -88,10 +90,25 @@ class AudioProcessor:
         return b"".join(items[-chunks_ago:]) if chunks_ago < len(items) else b"".join(items)
 
     # ---- helpers -------------------------------------------------------
-    def _wake_text(self, chunk: bytes) -> str:
+    def _wake_text(self, chunk: bytes):
+        """Returns (text, is_final) from the grammar recognizer."""
         if self.wake_rec.AcceptWaveform(chunk):
-            return json.loads(self.wake_rec.Result()).get("text", "")
-        return json.loads(self.wake_rec.PartialResult()).get("partial", "")
+            return json.loads(self.wake_rec.Result()).get("text", ""), True
+        return json.loads(self.wake_rec.PartialResult()).get("partial", ""), False
+
+    def _wake_in(self, text: str) -> bool:
+        """The hypothesis is a wake phrase, possibly followed by [unk] (the user kept talking).
+
+        Nothing may precede the phrase: in grammar mode the decoder's first guess for a new segment
+        is often a wake phrase that gets revised a few chunks later, so the caller also requires the
+        hypothesis to stay put for WAKE_STABLE_CHUNKS before trusting it.
+        """
+        toks = text.strip().lower().split()
+        for phrase in self.wake_phrases:
+            n = len(phrase.split())
+            if toks[:n] == phrase.split() and all(t == "[unk]" for t in toks[n:]):
+                return True
+        return False
 
     def _full_text(self, chunk: bytes):
         """Returns (text, is_final). Vosk's endpointer marks the end of an utterance."""
@@ -121,6 +138,7 @@ class AudioProcessor:
     # ---- main loop -----------------------------------------------------
     def run(self):
         self.running = True
+        streak = 0  # consecutive chunks whose wake hypothesis held
         self._start_capture()
         logger.info(f"Listening for wake words {self.wake_phrases} on {AUDIO_DEVICE} @ {SAMPLE_RATE} Hz")
         try:
@@ -128,9 +146,12 @@ class AudioProcessor:
                 chunk = self._read_chunk()
                 self._track_floor(self._rms(chunk))
                 self._full_text(chunk)  # keep the full recognizer in sync with the stream
-                text = self._wake_text(chunk)
-                if self._is_wake(text):
-                    logger.info(f"Wake word detected: '{text}'")
+                text, final = self._wake_text(chunk)
+                streak = streak + 1 if self._wake_in(text) else 0
+                if streak >= WAKE_STABLE_CHUNKS or (final and streak):
+                    logger.info(f"Wake word detected: '{text}' (stable {streak} chunks{', final' if final else ''})")
+                    self._dump_wav(self._audio_since(int(2500 / CHUNK_MS)), "wake")
+                    streak = 0
                     self.wake_rec.Reset()
                     result = self._capture_command()
                     if result != "reprompt":
@@ -282,6 +303,9 @@ class AudioProcessor:
                 w.setsampwidth(2)
                 w.setframerate(SAMPLE_RATE)
                 w.writeframes(audio)
+            import glob
+            for old in sorted(glob.glob(os.path.join(DEBUG_WAV_DIR, f"{tag}-*.wav")))[:-DEBUG_WAV_KEEP]:
+                os.remove(old)
         except OSError:
             pass
 
