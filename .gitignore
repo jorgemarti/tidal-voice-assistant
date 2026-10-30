@@ -29,6 +29,9 @@ wheels/
 # Tidal session
 tidal_session.json
 
+# Last.fm session
+lastfm_session.json
+
 # Vosk models (large files)
 vosk-model-*/
 *.zip
@@ -50,6 +53,7 @@ vosk-model-*/
 Thumbs.db
 
 # Logs
+logs/
 *.log
 
 # Temporary files

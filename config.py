@@ -12,6 +12,35 @@ load_dotenv()
 
 # Logging Configuration
 LOG_LEVEL = os.getenv('LOG_LEVEL', 'INFO').upper()
+# Optional log file (rotating, 5 x 5 MB). The systemd unit sets LOG_FILE=logs/assistant.log so the
+# log survives when stdout goes to the journal; without it only stdout is used.
+LOG_FILE = os.getenv('LOG_FILE', '')
+
+_BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+
+
+def _read_version():
+    try:
+        with open(os.path.join(_BASE_DIR, 'VERSION')) as f:
+            return f.read().strip()
+    except OSError:
+        return '0.0.0'
+
+
+VERSION = _read_version()
+_FILE_HANDLER = None
+
+
+def _file_handler():
+    """One shared rotating file handler for every logger (created on first use)."""
+    global _FILE_HANDLER
+    if _FILE_HANDLER is None and LOG_FILE:
+        from logging.handlers import RotatingFileHandler
+        path = LOG_FILE if os.path.isabs(LOG_FILE) else os.path.join(_BASE_DIR, LOG_FILE)
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+        _FILE_HANDLER = RotatingFileHandler(path, maxBytes=5 * 1024 * 1024, backupCount=5, encoding='utf-8')
+        _FILE_HANDLER.setFormatter(logging.Formatter(LOG_FORMAT, datefmt=LOG_DATE_FORMAT))
+    return _FILE_HANDLER
 LOG_FORMAT = '%(asctime)s - %(name)s - %(levelname)s - %(message)s'
 LOG_DATE_FORMAT = '%Y-%m-%d %H:%M:%S'
 
@@ -37,6 +66,8 @@ def setup_logging(name=None):
         formatter = logging.Formatter(LOG_FORMAT, datefmt=LOG_DATE_FORMAT)
         handler.setFormatter(formatter)
         logger.addHandler(handler)
+        if _file_handler():
+            logger.addHandler(_file_handler())
 
     return logger
 
@@ -47,7 +78,7 @@ RETRY_BACKOFF_MULTIPLIER = 2
 
 # Tidal Configuration
 TIDAL_CONFIG = {
-    'quality': 'LOSSLESS',  # Options: 'LOSSLESS', 'HIGH', 'LOW'
+    'quality': 'HIGH',  # Options: 'LOSSLESS', 'HIGH', 'LOW' (account tier currently returns HIGH)
     'session_file': 'tidal_session.json'
 }
 
@@ -61,51 +92,43 @@ CHROMECAST_NAME = "Altavoz Google"  # Your Nest Mini name
 CHROMECAST_PRECONNECT = True  # Connect to Chromecast on startup (reduces first-command latency)
 
 # Wake Word Configuration
-# Add your custom wake phrases here (Vosk uses unaccented text)
-# The system also uses a flexible regex pattern for variations
-# Include common Vosk misrecognitions
+# Phrases recognised by Vosk in grammar mode (use the model's accented spelling)
 WAKE_WORDS = [
-    'okay musica',    # No accent - Vosk uses unaccented
-    'okey musica',
-    'okey musical',
-    'okay musical',
-    'okay muy sica',  # Common misrecognition
-    'okey muy sica',
-    'okay muisica',
-    'okey muisica',
+    'okey música',
+    'okay música',
+    'ok música',
 ]
 
-# Custom wake word regex pattern (optional)
-# Set to None to use default pattern: ok/okay/okey + musica/música/musical
-# Example: r'\b(hey|hola)\s*(tidal)\b' for "Hey Tidal" or "Hola Tidal"
-WAKE_WORD_PATTERN = None
-
 # Speech Recognition Configuration
-VOSK_MODEL_PATH = "vosk-model-small-es-0.42"  # Small Spanish model for wake word detection
-SPEECH_TIMEOUT = 8  # Seconds to listen for command after wake word
-
-# Command Recognition Configuration (Hybrid Architecture)
-# Wake word detection: Vosk (local, fast, offline)
-# Command recognition: Google Speech API (cloud, accurate, free)
-COMMAND_RECOGNITION = 'google'  # Options: 'google', 'vosk' (fallback)
-COMMAND_LANGUAGE = 'es-ES'  # Spanish (Spain) for Google Speech API
+VOSK_MODEL_PATH = "vosk-model-small-es-0.42"  # Small Spanish model, used for wake word and local transcript
+SPEECH_TIMEOUT = 8  # Max seconds of command audio after the wake word
+COMMAND_NO_SPEECH_TIMEOUT = 4.0  # After the prompt cue, give up if nothing is said this long
+AUDIO_PRE_WAKE_SECONDS = 1.5  # Audio kept before the wake word detection for the LLM (so it hears the whole sentence)
 
 # Audio Configuration
-SAMPLE_RATE = 44100
-CHANNELS = 1
-CHUNK_SIZE = 8000
-AUDIO_INPUT_DEVICE_INDEX = 1  # USB PnP Sound Device (hw:2,0)
-AUDIO_GAIN = 1.0  # Software amplification (1.0 = no change, 2.0 = double volume, etc.)
+# The C-Media USB mic only captures at 44.1/48 kHz; plughw lets ALSA resample to 16 kHz for Vosk
+AUDIO_DEVICE = "plughw:0,0"
+SAMPLE_RATE = 16000
 
-# Voice Activity Detection (VAD) - reduces CPU usage by only processing speech
-VAD_ENABLED = True  # Enable VAD to reduce CPU from ~20% to ~5%
-VAD_AGGRESSIVENESS = 2  # 0-3, higher = more aggressive filtering (fewer false positives)
+# Command parsing: Gemini Flash (command audio only) with regex fallback
+COMMAND_PARSER = 'gemini'  # 'gemini' or 'regex'
+GEMINI_MODEL = 'gemini-3.5-flash-lite'
+GEMINI_USE_AUDIO = True  # Send the command audio to Gemini; False sends only the Vosk transcript
+# Artists the household asks for often. Sent to Gemini together with the Tidal favourites so it
+# recognises them in the audio (e.g. "Dàmaris Gelabert" was heard as "Els Amics de les Arts").
+KNOWN_ARTISTS = ['Dàmaris Gelabert', 'The Strokes', 'Queen', 'Rosalía', 'Manel', 'Dani Miquel', 'El Pot Petit']
 
 # TTS Configuration
 TTS_ENGINE = 'google'  # Options: 'google' (Google Translate TTS), 'local' (pyttsx3, offline)
 TTS_LOCAL_RATE = 175  # Speech rate for local TTS (words per minute)
 TTS_LOCAL_VOICE = None  # None = system default, or specify voice name
 TTS_SHORT_ANNOUNCEMENTS = False  # If True, use brief announcements (just track name)
+TTS_ANNOUNCE_PLAYBACK = False  # Say "Reproduciendo X de Y" before the music starts (adds ~7 s). The music itself is the feedback.
+PLAYBACK_CUES = False  # Play the timeout/error cues on the speaker (the wake cue after a pause is always played)
+
+# Last.fm scrobbling of what the speaker plays (needs LASTFM_API_KEY/LASTFM_API_SECRET in .env and `python lastfm_auth.py` once)
+LASTFM_SCROBBLE = True
+LASTFM_SESSION_FILE = 'lastfm_session.json'
 
 # Search Cache Configuration
 SEARCH_CACHE_ENABLED = True  # Cache Tidal search results

@@ -35,15 +35,17 @@ Jorge has a Google Nest Mini (2nd gen) that he uses for:
 
 ### Software Stack
 - **Python 3.9+**
-- **Vosk**: Offline wake word detection (Spanish model)
-- **Google Speech API**: Cloud-based command recognition (via SpeechRecognition library)
+- **Vosk**: Offline wake word detection and local transcript (small Spanish model, 16 kHz)
+- **Google Gemini** (`google-genai`): Command parsing from the command audio
 - **tidalapi**: Tidal API integration
 - **pychromecast**: Google Cast protocol for streaming to Nest Mini
-- **pyaudio**: Audio capture
+- **arecord** (alsa-utils): Audio capture from ALSA `plughw:0,0` at 16 kHz mono S16_LE
+- **pylast** (optional): Last.fm scrobbling
+- **systemd** on the Pi, deployed with `deploy.sh` (rsync over SSH)
 
 ### Language Requirements
 - All speech recognition must use **Spanish from Spain** (es-ES)
-- Wake phrases: "Okay música" or "Okey música" (fully offline detection)
+- Wake phrases: "Okey música", "Okay música" or "Ok música" (fully offline detection)
 - Command parsing must understand Spanish music commands
 - Voice feedback in Spanish when commands are understood
 
@@ -54,41 +56,47 @@ Jorge has a Google Nest Mini (2nd gen) that he uses for:
 For a detailed visual representation of the system architecture, see [architecture.svg](architecture.svg).
 
 **Hybrid Speech Recognition Architecture:**
-- **Wake Word Detection**: Vosk (local, offline, fast)
-- **Command Recognition**: Google Speech API (cloud, accurate, free)
+- **Wake Word Detection**: Vosk in grammar mode (local, offline, about 0.5 s, ~3% CPU)
+- **End of command**: an energy-based speech detector (RMS over a noise floor tracked while idle), because the small Vosk model is deaf to quiet or distant speech that Gemini hears fine
+- **Local transcript**: a second Vosk recognizer with free vocabulary on the same audio stream; only a hint and the fallback input
+- **Command Parsing**: Google Gemini (cloud) receives the command audio as WAV and returns `{action, query, artist, artist_alternatives, transcript}` as JSON
 
 **Component Flow:**
-- User → Microphone → AudioProcessor
-- AudioProcessor (Vosk) detects wake word locally
-- After wake word: Audio buffered → Google Speech API for accurate transcription
-- Transcribed command → Command Parser → Phonetic Matcher → Tidal Player
+- User → Microphone → `arecord` (ALSA `plughw:0,0`, 16 kHz) → AudioProcessor
+- AudioProcessor (Vosk grammar recognizer) detects the wake word locally and keeps a 20 s ring buffer
+- After wake word: the energy detector ends the utterance → `on_command` with audio (from 1.5 s before the wake word), local transcript, sample rate and a `reprompted` flag
+- `llm_parser.py` (Gemini) parses the audio; fallback only when Gemini is unavailable: regex `command_parser.py` on the local transcript → `tidal_player.smart_search_and_play(query, search_type, artist=..., artist_alternatives=...)`
 - Tidal Player ↔ Tidal API (search, stream URLs)
-- Tidal Player → Pychromecast → Google Nest Mini (audio playback)
+- Tidal Player → Pychromecast → Google Nest Mini (audio playback, with `MusicTrack` metadata)
+- Chromecast media status → `ScrobbleListener` → Last.fm (optional)
 
 ## Key Components
 
 ### 1. Audio Processor (`audio_processor.py`)
-- **Hybrid architecture**: Vosk for wake word, Google Speech API for commands
-- **Vosk grammar mode**: Constrained vocabulary for improved wake word accuracy
-- Vosk handles wake word detection locally (fast, offline, limited vocabulary)
-- After wake word: buffers audio and sends to Google for accurate transcription
-- Falls back to full-vocabulary Vosk if Google is unavailable
-- Default wake phrases: "Okay música", "Okey música"
-- Flexible regex matching for wake word variations
-- Voice Activity Detection (VAD) reduces CPU by filtering silence
-- Software audio gain for microphone sensitivity boost
-- 8-second timeout for command listening
+- **Capture**: `arecord -D plughw:0,0 -f S16_LE -r 16000 -c 1 -t raw` as a subprocess, read in 100 ms chunks (config `AUDIO_DEVICE`, `SAMPLE_RATE`). The C-Media USB mic only captures at 44.1/48 kHz, so ALSA's `plughw` resamples to the 16 kHz the Vosk model expects. The old pipeline fed 44.1 kHz audio to the 16 kHz model, which was the main reason recognition was terrible.
+- **Wake recognizer**: Vosk grammar mode with `WAKE_WORDS` (`okey música`, `okay música`, `ok música`) plus `[unk]`. Detection takes about 0.5 s and ~3% CPU.
+- **Full recognizer**: a second Vosk recognizer with free vocabulary runs in parallel on the same chunks; the text after the wake phrase is the local transcript, used only as a hint (control words after an `unknown` from Gemini) and as the regex fallback input.
+- **End of speech by energy**: the small model is deaf to quiet or distant speech, so the end of the command is decided by RMS over a noise floor tracked while idle (`SPEECH_RMS_MIN` 350, `SPEECH_RMS_RATIO` 2.5, `END_SILENCE_SECONDS` 0.9). Energy in the first `WAKE_TAIL_SECONDS` (0.6 s) is the tail of "música" and ignored. `SPEECH_TIMEOUT` (8 s) is the hard cap.
+- **Ring buffer**: 20 s of audio; the command audio sent on is the ring from `AUDIO_PRE_WAKE_SECONDS` (1.5 s) before the wake detection to the end of speech.
+- **One breath or two**: the user can say wake word and command together. If nothing is heard `EARLY_PROMPT_SECONDS` (1.2 s) after the wake word, `on_prompt` plays a short cue on the Nest Mini and listening continues for `COMMAND_NO_SPEECH_TIMEOUT` (4 s). The transcript is blanked for 1.3 s after the cue so the cue leaking into the mic does not pollute it. A short Vosk residue right after the wake word is kept as "leftover" and sent as the command after `LEFTOVER_WAIT_SECONDS` (2.5 s) if nothing else follows.
+- **Re-prompt**: when `on_command` returns `"reprompt"` (Gemini heard only the wake phrase or a lone verb), the processor cues again and listens once more without dropping the audio queued meanwhile; the second attempt carries `reprompted=True` and is final.
+- **Debug WAVs**: failed listening windows are saved as `/tmp/tidal-commands/timeout-HHMMSS.wav` (with 2 s before the wake); `llm_parser.py` keeps the last 10 command WAVs in the same directory. `/tmp` on the Pi is a 512 MB tmpfs.
+- **Callbacks**: `on_wake_word()`, `on_prompt()`, `on_command({'audio', 'transcript', 'sample_rate', 'reprompted'})`, `on_timeout()`.
+- **Backlog drain**: after each handled command, the audio queued in the `arecord` pipe meanwhile (TTS, cues) is dropped, so the speaker cannot trigger the wake word
 
-### 1.1 Cloud Recognizer (`cloud_recognizer.py`)
-- Google Speech API integration via SpeechRecognition library
-- High accuracy for Spanish commands + international artist/song names
-- Free tier (no API key required)
-- Automatic fallback to Vosk if network unavailable
+### 1.1 LLM Parser (`llm_parser.py`)
+- Sends only the command audio (WAV) to Google Gemini (`GEMINI_MODEL` `gemini-3.5-flash-lite`, `GEMINI_USE_AUDIO` True, thinking level minimal, JSON response). The local Vosk transcript is deliberately not sent in audio mode: it biased the model towards its own mistakes (for example "strauss" for The Strokes). With `GEMINI_USE_AUDIO = False` only the transcript is sent.
+- The prompt tells Gemini to keep titles and names in the language heard (Catalan, English, Portuguese), never to translate, never to add an artist it did not hear, and to answer `play_artist` for a bare artist name. `KNOWN_ARTISTS` (config) plus the Tidal favourite artists are sent only as a spelling aid.
+- Returns `{action, query, artist, artist_alternatives, transcript}`; the artist is kept separate from the query, `artist_alternatives` holds up to 2 guesses when the name was unclear
+- The last 10 command WAVs are kept in `/tmp/tidal-commands/` for debugging
+- Measured latency 1.4 to 2 s on the Pi
+- Needs `GEMINI_API_KEY` in `.env` (Gemini API billing is prepaid; HTTP 402 when the credit is depleted). Without it the parser is disabled.
+- In `main.py`, when Gemini answers `unknown`: if Vosk's transcript parses to a control command (para, siguiente, pausa, sigue) it is executed; if Gemini heard only the wake phrase or a single word, `on_command` returns `"reprompt"` and the processor cues once more; otherwise "No te he entendido" is spoken and the music resumes if it was playing. The regex `command_parser.py` on the local transcript (and the no-verb fallback: two or more words searched as a song) is used only when Gemini is unavailable
 
 ### 2. Phonetic Matcher (`phonetic_matcher.py`)
 - Uses g2p-en for grapheme-to-phoneme conversion
 - Fuzzy matching with fuzzywuzzy for Tidal search results
-- Helps match misrecognized artist/song names to actual Tidal results
+- Only used by the old `phonetic_search_and_play` path, which `main.py` no longer calls; the active path is `smart_search_and_play` (see 4)
 
 ### 3. Command Parser (`command_parser.py`)
 - Parses Spanish music commands:
@@ -103,10 +111,15 @@ For a detailed visual representation of the system architecture, see [architectu
 - Playlist commands:
   - "reproduce la playlist [nombre]" → play playlist
 - Uses regex patterns adapted for Spanish
+- Used as fallback on the local Vosk transcript only when Gemini is unavailable (`COMMAND_PARSER = 'regex'` makes it the only parser)
 
 ### 4. Tidal Integration (`tidal_player.py`)
 - OAuth device flow authentication
 - Search API integration with caching
+- **`smart_search_and_play(query, search_type, artist=None, artist_alternatives=None)`**: picks the best Tidal candidate by fuzzy matching on accent-stripped text (fuzzywuzzy `token_set_ratio`), weighting the artist name 40% when known (`MATCH_GOOD_SCORE` 75 stops trying alternatives, below `MATCH_MIN_SCORE` 55 it says "No he encontrado..."). Tries the artist heard, then its alternatives, then the title alone. Playlists are looked up first in the user's own and favourited playlists (`session.user.playlists()` and `favorites.playlists()`), then in the public catalogue. A song query without artist that matches an artist name at 90+ plays the artist instead ("reproduce Pearl Jam").
+- **`pause()`** stores the extrapolated position (`status.adjusted_current_time`) so `play()` resumes where the track was, not from the start; **`stop()`** logs nothing alarming when nothing was playing
+- **`play_media` metadata**: every track is cast with `MusicTrack` metadata (artist, album) via `_music_metadata`, so the speaker reports what it plays (used by the scrobbler, survives restarts)
+- No spoken announcement before the music (`TTS_ANNOUNCE_PLAYBACK = False`); `speak()` is used for "No te he entendido", "No he encontrado..." and the token expiry warning
 - Stream URL fetching
 - Session management with token refresh (auto-saves refreshed tokens)
 - **Autoplay/Continuous playback**: Automatically queues similar tracks using Tidal's track radio feature
@@ -119,6 +132,15 @@ For a detailed visual representation of the system architecture, see [architectu
 - Media casting via pychromecast
 - Handles stream URLs from Tidal
 - Pre-connects at startup for faster response
+
+### 6. Last.fm Scrobbler (`lastfm_scrobbler.py`, optional)
+- `LastFmScrobbler` sends "now playing" when a track starts and scrobbles it once it played half its length or 4 minutes (tracks over 30 s only) via `pylast`, with a guard against double scrobbles on resume; `ScrobbleListener` is registered as a pychromecast media status listener in `find_chromecast`, so autoplay, skips, pauses and resumes are tracked from what the speaker reports. `_track_info_for` resolves the title against the internal queue; a track not in the queue (queued before a restart) is trusted from the Chromecast's own metadata. TTS and cues carry no artist and are ignored.
+- Needs `LASTFM_API_KEY` and `LASTFM_API_SECRET` in `.env` and `lastfm_session.json` (gitignored) from a one-time `python lastfm_auth.py` (desktop auth flow, polls until approved). `LASTFM_SCROBBLE` in `config.py` turns it off. Tidal itself exposes no listening history.
+
+### 7. Versioning, deployment and logging
+- `VERSION` (semantic versioning, 2.0.0) is read by `config.py` as `VERSION`, logged at startup ("Tidal Voice Assistant v2.0.0 starting") and printed by `python main.py --version`. Bump it and tag the release (`git tag v2.0.0`).
+- `./deploy.sh` rsyncs the project to the Pi (`PI_HOST`, default `cockemc@192.168.1.54`, path `/home/cockemc/tidal-voice-assistant`; excludes venv, model, `.env`, session files, logs), installs `requirements.txt` in the Pi venv, restarts `tidal-assistant` and shows status and the last log lines. `./deploy.sh --install` also copies and enables the unit.
+- `tidal-assistant.service` runs as user `cockemc`, `Restart=always`, logs to the journal (`journalctl -u tidal-assistant -f`) and, via `Environment=LOG_FILE=logs/assistant.log`, to a rotating file (`RotatingFileHandler`, 5 x 5 MB) at `~/tidal-voice-assistant/logs/assistant.log`. `logs/` is gitignored. `LOG_LEVEL` comes from `.env`.
 
 ## Spanish Command Patterns
 
@@ -161,14 +183,18 @@ commands = {
 ### Environment Variables (`.env`)
 ```bash
 LOG_LEVEL=INFO  # Optional: DEBUG, INFO, WARNING, ERROR, CRITICAL
+GEMINI_API_KEY=  # Required for COMMAND_PARSER = 'gemini'
+LASTFM_API_KEY=  # Optional, Last.fm scrobbling (plus `python lastfm_auth.py` once)
+LASTFM_API_SECRET=
+# LOG_FILE is set by the systemd unit (logs/assistant.log), not in .env
 ```
 
-**Note**: Tidal authentication uses OAuth device flow - no credentials needed in `.env`
+**Note**: Tidal authentication uses OAuth device flow, no credentials needed in `.env`
 
 ### Config File (`config.py`)
 ```python
 TIDAL_CONFIG = {
-    'quality': 'LOSSLESS',  # LOSSLESS, HIGH, LOW
+    'quality': 'HIGH',  # LOSSLESS, HIGH, LOW (account tier currently returns AAC HIGH)
     'session_file': 'tidal_session.json'
 }
 
@@ -178,37 +204,53 @@ AUTOPLAY_TRACK_COUNT = 10 # Number of similar tracks to queue for autoplay
 
 CHROMECAST_NAME = "Altavoz Google"  # User's Nest Mini name
 
-# Hybrid Speech Recognition
-COMMAND_RECOGNITION = 'google'  # 'google' (cloud) or 'vosk' (local fallback)
-COMMAND_LANGUAGE = 'es-ES'      # Spanish (Spain) for Google Speech API
+# Wake Word and Speech Recognition
+WAKE_WORDS = ['okey música', 'okay música', 'ok música']  # Vosk grammar mode
+VOSK_MODEL_PATH = "vosk-model-small-es-0.42"
+SPEECH_TIMEOUT = 8               # Max seconds of command audio after the wake word
+COMMAND_NO_SPEECH_TIMEOUT = 4.0  # After the prompt cue, give up if nothing is said this long
+AUDIO_PRE_WAKE_SECONDS = 1.5     # Audio kept before the wake detection for the LLM
 
 # Audio Configuration
-AUDIO_INPUT_DEVICE_INDEX = 1  # USB mic device index (run list_audio_devices.py)
-AUDIO_GAIN = 1.0              # Software amplification (1.0 = off, 1.5-2.0 = boost)
+AUDIO_DEVICE = "plughw:0,0"   # ALSA device; plughw resamples the USB mic's 44.1/48 kHz to 16 kHz
+SAMPLE_RATE = 16000
 
-# TTS Configuration
+# Command Parsing
+COMMAND_PARSER = 'gemini'     # 'gemini' or 'regex'
+GEMINI_MODEL = 'gemini-3.5-flash-lite'
+GEMINI_USE_AUDIO = True       # Send the command audio; False sends only the Vosk transcript
+KNOWN_ARTISTS = [...]         # Spelling aid for Gemini, merged with the Tidal favourite artists
+
+# TTS and cues
 TTS_ENGINE = 'google'         # 'google' (recommended) or 'local' (pyttsx3)
-TTS_SHORT_ANNOUNCEMENTS = False  # Brief "Rosalía" vs full "Reproduciendo Rosalía"
+TTS_ANNOUNCE_PLAYBACK = False # No "Reproduciendo X de Y": the music is the feedback (saves ~7 s)
+TTS_SHORT_ANNOUNCEMENTS = False  # Only relevant when TTS_ANNOUNCE_PLAYBACK is True
+PLAYBACK_CUES = False         # Timeout/error cues on the speaker; the wake cue after a pause always plays
+
+# Last.fm
+LASTFM_SCROBBLE = True
+LASTFM_SESSION_FILE = 'lastfm_session.json'
 ```
+
+The speech detector constants (`SPEECH_RMS_MIN`, `SPEECH_RMS_RATIO`, `END_SILENCE_SECONDS`, `WAKE_TAIL_SECONDS`, `EARLY_PROMPT_SECONDS`, `LEFTOVER_WAIT_SECONDS`, `PROMPT_BLANK_SECONDS`) live at the top of `audio_processor.py`; the match thresholds (`MATCH_GOOD_SCORE`, `MATCH_MIN_SCORE`) in `tidal_player.py`.
 
 ## Usage Flow
 
 ### Music Playback Flow
 1. **User says**: "Okey música, reproduce Bohemian Rhapsody"
-2. **Wake word detected**: Vosk detects "okey música" locally (offline)
-3. **Audio buffered**: Command audio recorded to buffer
-4. **Cloud transcription**: Google Speech API accurately transcribes command
-5. **Parsed**: Command parser extracts "reproduce" + "Bohemian Rhapsody"
-6. **Searched**: Tidal API finds matching track
-7. **Announced**: TTS announces "Reproduciendo Bohemian Rhapsody de Queen"
-8. **Streamed**: Pychromecast sends audio URL to Nest Mini
-9. **Playback**: Music plays on Nest Mini
-10. **Autoplay**: Similar tracks are automatically queued for continuous playback
+2. **Wake word detected**: Vosk detects "okey música" locally (offline, about 0.5 s); music is paused if playing (no cue)
+3. **Utterance captured**: the energy detector ends the utterance 0.9 s after the voice stops; ring buffer audio (from 1.5 s before the wake phrase) and the local transcript are collected
+4. **Cloud parsing**: Gemini receives the command audio (1.5 to 2 s)
+5. **Parsed**: Gemini returns `play_song` with query "Bohemian Rhapsody" and artist "Queen"
+6. **Searched**: `smart_search_and_play` searches Tidal (about 1 s) and picks the best candidate by fuzzy match, weighting the artist
+7. **Streamed**: Pychromecast sends the stream URL with artist and album metadata to the Nest Mini (2 to 3 s to load); nothing is announced
+8. **Playback**: Music plays on the Nest Mini about 5 s after the end of the command; Last.fm gets "now playing"
+9. **Autoplay**: Similar tracks are automatically queued for continuous playback
 
 **Autoplay Behavior:**
 - **Single song**: Plays the requested track, then queues 10 similar tracks from Tidal's track radio (shuffled)
 - **Artist**: Queues up to 20 top tracks from the artist (shuffled)
-- **Album**: Queues all tracks from the album in order (not shuffled - preserves album order)
+- **Album**: Queues all tracks from the album in order (not shuffled, preserves album order)
 - **Playlist**: Queues all tracks from the playlist (shuffled)
 
 Autoplay can be disabled by setting `AUTOPLAY_ENABLED = False` in `config.py`.
@@ -218,13 +260,14 @@ When music is playing, the system is context-aware:
 
 1. **User says**: "Okey música"
 2. **Wake word detected**: Vosk detects trigger phrase locally
-3. **Music paused**: System pauses playback so mic doesn't pick up music
-4. **Short prompt**: Nest Mini says "¿Sí?" (shorter than initial "¿Qué quieres escuchar?")
-5. **Command captured**: Audio recorded without music interference
-6. **Cloud transcription**: Google Speech API transcribes accurately
-7. **Parsed**: Command parser identifies action (stop/skip/pause/resume/new search)
-8. **Executed**: Action performed
-9. **Smart resume**: If command not understood or timeout, music resumes automatically
+3. **Music paused**: `on_wake_word` pauses playback (remembering `was_playing` and the extrapolated position) so the mic doesn't pick up music
+4. **Short cue**: if nothing is heard 1.2 s after the wake word, `on_prompt` plays a short beep on the Nest Mini and listening continues for 4 s
+5. **Command captured**: Audio recorded without music interference (transcript blanked for 1.3 s after the cue)
+6. **Cloud parsing**: Gemini parses the audio
+7. **Parsed**: action identified (stop/skip/pause/resume/new search). If Gemini says `unknown` but Vosk caught "para", "siguiente", "pausa" or "sigue", that control command runs; if Gemini heard only the wake phrase or one word, the cue plays again and the assistant listens once more
+8. **Executed**: Action performed (stop is silent, resume continues from the stored position)
+9. **Smart resume**: If the command is not understood ("No te he entendido") or nothing is said, music resumes only if it was playing before; the timeout cue plays only with `PLAYBACK_CUES = True`
+10. **Backlog drop**: audio captured while the command was handled is discarded so the speaker cannot retrigger the wake word
 
 For non-music commands, user continues using:
 - "Ok Google, ¿qué tiempo hace?"
@@ -235,7 +278,7 @@ For non-music commands, user continues using:
 ### Phase 1: Core Functionality (Completed)
 - [x] Wake word detection (Vosk-based, fully offline)
 - [x] Vosk grammar mode for improved wake word accuracy
-- [x] Spanish speech recognition (hybrid: Vosk + Google)
+- [x] Spanish speech recognition (hybrid: Vosk + Gemini)
 - [x] Basic command parsing
 - [x] Tidal authentication (OAuth device flow)
 - [x] Chromecast streaming
@@ -248,12 +291,15 @@ For non-music commands, user continues using:
 - [x] **Full album and artist playback** (queues all tracks with shuffle)
 
 ### Phase 2: Enhanced Features (Completed)
-- [x] Voice Activity Detection (VAD) for CPU optimization
-- [x] Software audio gain for microphone sensitivity
+- [x] 16 kHz ALSA capture via `arecord`/`plughw` (2026-10-30 rewrite)
+- [x] Gemini command parsing from audio (2026-10-30 rewrite)
 - [x] Search result caching
 - [x] Internal queue tracking (survives TTS interruption)
 - [x] **Skip track functionality** ("siguiente", "salta", "pasa la canción")
 - [x] **Playlist support** ("reproduce la playlist X")
+- [x] Energy-based end of speech, early cue, re-prompt and debug WAVs (2026-10-30)
+- [x] Last.fm scrobbling (2026-10-30)
+- [x] Versioning (`VERSION`), `deploy.sh`, rotating log file (2026-10-30)
 - [ ] Volume control via voice
 
 ### Phase 3: Advanced Features
@@ -282,71 +328,88 @@ For non-music commands, user continues using:
 
 ## Known Issues & Limitations
 
-1. **Wake Word CPU Usage**: ~5-10% CPU with VAD and grammar mode (improved from ~15-25%)
-2. **Wake Word Latency**: 200-500ms detection time (vs <50ms with cloud solutions like Picovoice)
-3. **Network Dependency**: Requires stable WiFi for command recognition (Google API) and Chromecast
-4. **Wake Word Offline**: Wake word detection works without internet; only command recognition needs network
-5. **Tidal API**: Rate limits may apply for heavy usage
-6. **Language**: Currently only Spanish from Spain (could add Catalan)
-7. **Chromecast Queue**: TTS interrupts Chromecast queue (mitigated with internal queue tracking)
+1. **CPU Usage**: ~3% for the wake recognizer (grammar mode) plus roughly 12% of one core for the free-vocabulary recognizer
+2. **Latency**: wake word about 0.5 s, then about 5 s from the end of the command to music (Gemini 1.5 to 2 s, Tidal search about 1 s, Chromecast load 2 to 3 s)
+3. **Microphone**: the C-Media USB mic is the weak point (noisy, 48 kHz only, misses quiet or distant speech); a far-field USB speakerphone or mic array is the recommended upgrade. The large Vosk model (`vosk-model-es-0.42`) was tested and rejected: no grammar mode, 4.3 GB RAM, near real-time CPU, no accuracy gain. Mic gain 16/16 with AGC off is persisted via `alsactl store`; the Pi fan thresholds were raised in `/boot/firmware/config.txt` (outside the repo) to cut noise
+4. **Network Dependency**: Requires stable WiFi for command parsing (Gemini API, prepaid billing, 402 when depleted) and Chromecast
+5. **Wake Word Offline**: Wake word detection and the local transcript work without internet; only command parsing needs network (regex fallback otherwise)
+6. **Tidal API**: Rate limits may apply for heavy usage
+7. **Language**: Currently only Spanish from Spain (could add Catalan)
+8. **Chromecast Queue**: TTS and cues interrupt the Chromecast queue (mitigated with internal queue tracking)
+9. **Tests**: `tests/test_command_parser.py::test_pon_song` fails (pre-existing, regex fallback only)
 
 ## Security Considerations
 
 - OAuth tokens stored in `tidal_session.json` (gitignored)
-- No passwords stored - OAuth device flow only
+- No passwords stored: OAuth device flow only
 - Wake word processing is local and offline (no cloud)
-- Command audio sent to Google Speech API only after wake word detected
+- `GEMINI_API_KEY` and the Last.fm keys live in `.env` (gitignored); `lastfm_session.json` is gitignored too
+- Command audio (from 1.5 s before the wake phrase to the end of speech) is sent to Gemini only after wake word detected; copies are kept in `/tmp/tidal-commands` (tmpfs) for debugging
 - No encryption on local audio capture (acceptable for home use)
 
 ## Performance Considerations
 
-- **Wake word detection**: 200-500ms latency, ~5-10% CPU usage (with VAD + grammar mode)
-- **Command recognition**: 1-2 seconds (Google Speech API, high accuracy)
-- **Tidal search**: 500ms-1s (with caching for repeated queries)
-- **TTS announcement**: 2-4 seconds
-- **Chromecast streaming**: <1s buffering (pre-connected at startup)
-- **Total response time**: 5-8 seconds from wake word to music playback (with TTS announcement)
+Measured on a Raspberry Pi 5:
+- **Wake word detection**: about 0.5 s, ~3% CPU (Vosk grammar mode)
+- **End of speech**: 0.9 s of silence after the voice stops (energy detector)
+- **Command parsing**: 1.5 to 2 s (Gemini, audio only)
+- **Tidal search**: about 1 s (cached for repeated queries)
+- **Chromecast load**: 2 to 3 s (pre-connected at startup)
+- **Total response time**: about 5 s from the end of the command to music playback (no spoken announcement)
 
 ## Dependencies
 
 ### System Packages
 ```bash
-portaudio19-dev     # Audio I/O (pyaudio installed via pip)
-flac                # Audio conversion for Google Speech API
+alsa-utils          # arecord (audio capture), amixer, alsactl
+python3-venv python3-pip git
+ffmpeg              # Optional, only for the test scripts
 ```
+
+No system Python audio packages are needed. The venv on the Pi is created with `python3 -m venv --system-site-packages venv`.
 
 ### Python Packages
 ```
-vosk                # Wake word detection (local, offline)
-SpeechRecognition   # Google Speech API for commands (cloud, accurate)
-pyaudio             # Audio capture
+vosk                # Wake word detection and local transcript (offline)
+google-genai        # Gemini command parsing
 tidalapi            # Tidal API
 pychromecast        # Chromecast protocol
 python-dotenv       # Environment variables
-gtts                # Text-to-speech (testing only)
+requests            # HTTP utilities
+g2p-en, fuzzywuzzy, nltk, python-Levenshtein  # Fuzzy and phonetic matching
+gtts, pyttsx3       # Text-to-speech (Google / local)
+pylast              # Last.fm scrobbling (optional)
+pytest              # Tests: python -m pytest tests -q
 ```
 
 ## File Structure
 
 ```
 tidal-voice-assistant/
-├── main.py                      # Entry point
-├── config.py                    # Configuration
-├── audio_processor.py          # Hybrid audio processing (Vosk wake word + Google commands)
-├── cloud_recognizer.py         # Google Speech API integration
-├── command_parser.py           # Parse Spanish commands
+├── main.py                      # Entry point (--version)
+├── config.py                    # Configuration, logging (rotating file), VERSION
+├── VERSION                      # Semantic version (2.0.0)
+├── audio_processor.py          # ALSA capture (arecord), Vosk wake word, energy-based end of speech
+├── llm_parser.py               # Gemini command parser (command audio)
+├── command_parser.py           # Regex parser for Spanish commands (fallback)
 ├── phonetic_matcher.py         # Phonetic matching for fuzzy search
 ├── tidal_player.py             # Tidal + Chromecast
 ├── tidal_auth.py               # Tidal authentication
-├── list_audio_devices.py       # List available audio devices
+├── lastfm_scrobbler.py         # Last.fm scrobbling (optional, from Chromecast media status)
+├── lastfm_auth.py              # One-time Last.fm authorisation
+├── tts_engine.py               # TTS engine (Google or local pyttsx3)
+├── utils.py                    # Utility functions and decorators
 ├── test_chromecast.py          # Chromecast testing
 ├── test_tidal.py               # Tidal testing
-├── test_wake_word.py           # Wake word testing and troubleshooting
+├── tests/                      # Unit tests (command parser, phonetic matcher, Last.fm scrobbler)
 ├── requirements.txt            # Python deps
 ├── .env.example                # Environment template
-├── tidal-assistant.service     # Systemd service
-├── alternative.md              # Speech recognition alternatives analysis
-└── vosk-model-small-es-0.42/   # Spanish model for wake word (244MB, downloaded)
+├── setup.sh                    # Setup script for the Pi
+├── deploy.sh                   # rsync to the Pi, pip install, service restart (--install)
+├── tidal-assistant.service     # Systemd service (user cockemc, journal + logs/assistant.log)
+├── improvements.md             # Future improvement ideas
+├── logs/                       # Rotating log file on the Pi (gitignored)
+└── vosk-model-small-es-0.42/   # Spanish Vosk model (~58 MB on disk, downloaded)
 ```
 
 ## User Experience Goals
@@ -383,12 +446,12 @@ tidal-voice-assistant/
 ## Resources & References
 
 - **Vosk Models**: https://alphacephei.com/vosk/models
-  - Using: `vosk-model-small-es-0.42` (244MB, low memory usage)
-  - Used for wake word detection only
+  - Using: `vosk-model-small-es-0.42` (~58 MB on disk, low memory usage)
+  - Used for wake word detection (grammar mode) and the local transcript
 
-- **SpeechRecognition**: https://github.com/Uberi/speech_recognition
-  - Google Speech API wrapper (free tier, no API key needed)
-  - Used for accurate command recognition
+- **Google Gemini API** (`google-genai`): https://ai.google.dev/gemini-api/docs
+  - Parses the command from the audio alone
+  - Needs `GEMINI_API_KEY`; billing is prepaid
 
 - **Pychromecast**: https://github.com/home-assistant-libs/pychromecast
   - Google Cast protocol implementation
@@ -421,23 +484,42 @@ When working on this project:
 
 ```bash
 # Setup
-python3 -m venv venv
+sudo apt install -y alsa-utils python3-venv python3-pip git
+python3 -m venv --system-site-packages venv
 source venv/bin/activate
 pip install -r requirements.txt
+cp .env.example .env   # set GEMINI_API_KEY
 
-# Download Spanish model (244MB)
+# Download Spanish model (~58 MB on disk)
 wget https://alphacephei.com/vosk/models/vosk-model-small-es-0.42.zip
 unzip vosk-model-small-es-0.42.zip
+
+# Microphone: raise gain, disable AGC, persist, and test a 16 kHz recording
+amixer -c 0 cset numid=3 16
+amixer -c 0 cset numid=4 off
+sudo alsactl store
+arecord -D plughw:0,0 -f S16_LE -r 16000 -c 1 -d 5 test.wav && aplay test.wav
 
 # Test Chromecast
 python test_chromecast.py --discover
 python test_chromecast.py --test
 
-# Authenticate Tidal (OAuth device flow - follow URL in output)
+# Authenticate Tidal (OAuth device flow, follow URL in output)
 python tidal_auth.py
+
+# Optional: Last.fm scrobbling (keys in .env first)
+python lastfm_auth.py
 
 # Run application
 python main.py
+python main.py --version
+
+# Unit tests
+python -m pytest tests -q
+
+# Deploy to the Pi from the workstation and watch the log
+./deploy.sh              # ./deploy.sh --install the first time
+ssh cockemc@192.168.1.54 tail -f tidal-voice-assistant/logs/assistant.log
 ```
 
 This context should help you understand the project's goals, architecture, and technical requirements for future development sessions.

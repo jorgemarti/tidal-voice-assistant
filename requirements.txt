@@ -1,17 +1,14 @@
-# Speech recognition - Hybrid Architecture
-# Vosk: Wake word detection (local, offline)
-vosk==0.3.45
-# SpeechRecognition: Google Speech API for commands (cloud, accurate, free)
-SpeechRecognition>=3.10.0
-
-# Audio capture
-pyaudio==0.2.14
-
-# Voice Activity Detection (reduces CPU usage)
-webrtcvad==2.0.10
+# Speech recognition
+# Vosk: wake word (grammar mode) and local transcript, 16 kHz via ALSA plughw (arecord, alsa-utils)
+vosk>=0.3.45
+# Gemini Flash: command parsing from the command audio
+google-genai>=1.0.0
 
 # Tidal API integration
 tidalapi>=0.8.10
+
+# Last.fm scrobbling (optional)
+pylast>=5.0
 
 # Chromecast protocol
 pychromecast==14.0.1

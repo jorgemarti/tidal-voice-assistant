@@ -24,11 +24,13 @@ sudo apt update
 
 # Install dependencies
 echo "📦 Installing system dependencies..."
-sudo apt install -y python3-pip python3-venv portaudio19-dev git unzip wget
+sudo apt install -y python3-pip python3-venv alsa-utils git unzip wget
+# Optional, only for the test scripts:
+# sudo apt install -y ffmpeg
 
 # Create virtual environment
 echo "🐍 Creating Python virtual environment..."
-python3 -m venv venv
+python3 -m venv --system-site-packages venv
 
 # Activate virtual environment
 source venv/bin/activate
@@ -43,13 +45,12 @@ pip install -r requirements.txt
 
 # Download Spanish Vosk model
 echo "📥 Downloading Spanish speech recognition model..."
-echo "   (This may take a few minutes - ~244MB download)"
+echo "   (~40MB download, ~58MB on disk)"
 
-if [ ! -d "vosk-model-es" ]; then
+if [ ! -d "vosk-model-small-es-0.42" ]; then
     wget -q --show-progress https://alphacephei.com/vosk/models/vosk-model-small-es-0.42.zip
     echo "📦 Extracting model..."
     unzip -q vosk-model-small-es-0.42.zip
-    mv vosk-model-small-es-0.42 vosk-model-es
     rm vosk-model-small-es-0.42.zip
     echo "✅ Model installed"
 else
@@ -60,9 +61,8 @@ fi
 if [ ! -f .env ]; then
     echo "📝 Creating .env file..."
     cp .env.example .env
-    echo "⚠️  Please edit .env file and add your credentials:"
-    echo "   - TIDAL_USERNAME"
-    echo "   - TIDAL_PASSWORD"
+    echo "⚠️  Please edit .env file and add your Gemini API key:"
+    echo "   - GEMINI_API_KEY (Tidal uses OAuth, no credentials needed)"
 else
     echo "✅ .env file already exists"
 fi
@@ -74,20 +74,26 @@ echo "======================================================================"
 echo ""
 echo "Next steps:"
 echo ""
-echo "1. Edit .env file with your credentials:"
+echo "1. Edit .env file and set GEMINI_API_KEY:"
 echo "   nano .env"
 echo ""
-echo "2. Authenticate with Tidal:"
+echo "2. Raise the USB mic gain and disable AGC (C-Media mic, card 0):"
+echo "   amixer -c 0 cset numid=3 16"
+echo "   amixer -c 0 cset numid=4 off"
+echo "   sudo alsactl store"
+echo "   arecord -D plughw:0,0 -f S16_LE -r 16000 -c 1 -d 5 test.wav && aplay test.wav"
+echo ""
+echo "3. Authenticate with Tidal:"
 echo "   source venv/bin/activate"
 echo "   python tidal_auth.py"
 echo ""
-echo "3. Test Chromecast connection:"
+echo "4. Test Chromecast connection:"
 echo "   python test_chromecast.py --discover"
 echo "   python test_chromecast.py --test"
 echo ""
-echo "4. Update config.py with your Nest Mini name"
+echo "5. Update config.py with your Nest Mini name"
 echo ""
-echo "5. Run the application:"
+echo "6. Run the application:"
 echo "   python main.py"
 echo ""
 echo "For more information, see README.md"

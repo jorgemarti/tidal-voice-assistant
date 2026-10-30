@@ -8,14 +8,18 @@ import pychromecast
 import time
 import threading
 import random
+import unicodedata
+from fuzzywuzzy import fuzz
 from phonetic_matcher import PhoneticMatcher
 from tts_engine import get_tts_engine
+from lastfm_scrobbler import LastFmScrobbler, ScrobbleListener
 from config import (
     CHROMECAST_NAME, TIDAL_CONFIG, setup_logging,
     RETRY_MAX_ATTEMPTS, RETRY_DELAY_SECONDS, RETRY_BACKOFF_MULTIPLIER,
     AUTOPLAY_ENABLED, AUTOPLAY_TRACK_COUNT,
     SEARCH_CACHE_ENABLED, SEARCH_CACHE_TTL, SEARCH_CACHE_MAX_SIZE,
-    TTS_SHORT_ANNOUNCEMENTS
+    TTS_SHORT_ANNOUNCEMENTS,
+    TTS_ANNOUNCE_PLAYBACK
 )
 
 logger = setup_logging(__name__)
@@ -94,6 +98,7 @@ class TidalPlayer:
 
         # Track state for resume after TTS
         self._current_track = None
+        self._scrobbler = LastFmScrobbler()
         self._paused_position = 0
         self._was_paused_for_command = False
 
@@ -190,6 +195,8 @@ class TidalPlayer:
                 self.cast_device = chromecasts[0]
                 self.cast_device.wait(timeout=10)
                 self.media_controller = self.cast_device.media_controller
+                if self._scrobbler.enabled:
+                    self.media_controller.register_status_listener(ScrobbleListener(self._scrobbler, self._track_info_for))
 
                 logger.info(f"Connected to: {self.cast_device.name}")
                 logger.debug(f"Model: {self.cast_device.model_name}, IP: {self.cast_device.cast_info.host}")
@@ -275,6 +282,20 @@ class TidalPlayer:
 
         return None
     
+    @staticmethod
+    def _music_metadata(track):
+        """Cast MusicTrackMediaMetadata so the speaker reports artist and album in its media status."""
+        return {"metadataType": 3, "title": track.name, "artist": track.artist.name,
+                "albumName": track.album.name if track.album else None}
+
+    def _track_info_for(self, title, artist=None):
+        """Metadata of a queued track by the title the speaker reports; None for TTS and cues."""
+        candidates = list(self._track_queue) + ([self._current_track] if self._current_track else [])
+        for t in candidates:
+            if t and t.name == title and (not artist or t.artist.name == artist):
+                return {"title": t.name, "artist": t.artist.name, "album": t.album.name if t.album else None, "duration": t.duration}
+        return None
+
     def play_track(self, track, retry=True, enqueue=False):
         """
         Play a single track on Chromecast with retry support.
@@ -309,6 +330,7 @@ class TidalPlayer:
                     'audio/mp4',
                     title=track.name,
                     thumb=track.album.image(1280) if track.album else None,
+                    metadata=self._music_metadata(track),
                     enqueue=enqueue
                 )
 
@@ -573,6 +595,125 @@ class TidalPlayer:
 
         return False
 
+    # ------------------------------------------------------------------
+    # Matching with clean text (from the LLM): fuzzy on normalised strings,
+    # weighting the artist when we know it. The phonetic matcher stays for
+    # the regex fallback path, whose input is a garbled transcript.
+    # ------------------------------------------------------------------
+    MATCH_GOOD_SCORE = 75  # good enough to stop trying alternatives
+    MATCH_MIN_SCORE = 55   # below this we rather admit we did not find it
+
+    @staticmethod
+    def _norm(text):
+        text = unicodedata.normalize('NFKD', text or '')
+        text = ''.join(c for c in text if not unicodedata.combining(c))
+        return ''.join(c if c.isalnum() or c.isspace() else ' ' for c in text.lower()).strip()
+
+    def _best_match(self, results, query, search_type, artist=None):
+        best, best_score = None, -1
+        for r in results:
+            score = fuzz.token_set_ratio(self._norm(query), self._norm(r.name))
+            if artist and search_type in ('track', 'album'):
+                r_artist = getattr(getattr(r, 'artist', None), 'name', '') or ''
+                score = 0.6 * score + 0.4 * fuzz.token_set_ratio(self._norm(artist), self._norm(r_artist))
+            logger.debug(f"  candidate '{r.name}'" + (f" by {getattr(getattr(r, 'artist', None), 'name', '')}" if search_type == 'track' else '') + f": {score:.0f}")
+            if score > best_score:
+                best, best_score = r, score
+        return best, best_score
+
+    def _user_playlists(self):
+        """Jorge's own playlists plus the ones he favourited."""
+        playlists = []
+        for getter in (lambda: self.session.user.playlists(), lambda: self.session.user.favorites.playlists()):
+            try:
+                playlists.extend(getter() or [])
+            except Exception as e:
+                logger.debug(f"Could not list user playlists: {e}")
+        return playlists
+
+    def favourite_artist_names(self, limit=100):
+        """Names of the favourited artists plus the artists of favourited tracks (context for the LLM)."""
+        names = []
+        try:
+            names += [a.name for a in self.session.user.favorites.artists(limit=limit)]
+            names += [t.artist.name for t in self.session.user.favorites.tracks(limit=limit)]
+        except Exception as e:
+            logger.debug(f"Could not read Tidal favourites: {e}")
+        return list(dict.fromkeys(n for n in names if n))
+
+    def smart_search_and_play(self, query, search_type='track', artist=None, artist_alternatives=None):
+        """
+        Search Tidal with a clean query (title or name) and an optional artist, pick the best
+        candidate by fuzzy matching and play it. Playlists are looked up in the user's own
+        library before the public catalogue.
+        """
+        if not self.cast_device and not self.find_chromecast():
+            return False
+        self.clear_queue()
+
+        results = None
+        if search_type == 'playlist':
+            mine = self._user_playlists()
+            if mine:
+                best, score = self._best_match(mine, query, search_type)
+                logger.debug(f"Best user playlist for '{query}': '{best.name}' ({score:.0f})")
+                if score >= 60:
+                    results = [best]
+        best, score = None, -1
+        if not results:
+            if artist and search_type == 'track':
+                # Try the artist the model heard, then its alternatives; a poor match means the
+                # artist was misheard, so finally search the title alone.
+                for candidate_artist in [artist] + list(artist_alternatives or []):
+                    found = self.search_tidal(f"{query} {candidate_artist}", search_type, limit=10)
+                    if not found:
+                        continue
+                    b, sc = self._best_match(found, query, search_type, candidate_artist)
+                    if sc > score:
+                        best, score, results = b, sc, found
+                    if sc >= self.MATCH_GOOD_SCORE:
+                        break
+                if score < self.MATCH_GOOD_SCORE:
+                    found = self.search_tidal(query, search_type, limit=10)
+                    if found:
+                        b, sc = self._best_match(found, query, search_type)
+                        if sc > score:
+                            best, score, results = b, sc, found
+            else:
+                results = self.search_tidal(query, search_type, limit=10)
+                if results:
+                    best, score = self._best_match(results, query, search_type, artist)
+        else:
+            best, score = self._best_match(results, query, search_type, artist)
+
+        if search_type == 'track' and not artist:
+            # "reproduce Pearl Jam": a bare name that matches an artist at least as well as any track
+            found_artists = self.search_tidal(query, 'artist', limit=5)
+            if found_artists:
+                a_best, a_score = self._best_match(found_artists, query, 'artist')
+                if a_score >= 90 and a_score >= score:
+                    logger.info(f"'{query}' is artist '{a_best.name}' ({a_score:.0f}), better than any track ({score:.0f})")
+                    return self.play_artist_top_tracks(a_best)
+
+        if not best or score < self.MATCH_MIN_SCORE:
+            logger.warning(f"No convincing {search_type} for '{query}'" + (f" by '{artist}'" if artist else '') + f" (best score {score:.0f})")
+            self.speak(f"No he encontrado {query}" + (f" de {artist}" if artist else ''))
+            return False
+        logger.info(f"Selected {search_type} '{best.name}' (score {score:.0f}) for '{query}'" + (f" by '{artist}'" if artist else ''))
+
+        if search_type == 'track':
+            self._announce_track(best)
+            return self.play_track_with_autoplay(best)
+        elif search_type == 'artist':
+            return self.play_artist_top_tracks(best)
+        elif search_type == 'album':
+            self._announce_album(best)
+            return self.play_album(best)
+        elif search_type == 'playlist':
+            self._announce_playlist(best)
+            return self.play_playlist(best)
+        return False
+
     def search_and_play(self, query, search_type='track'):
         """
         Search Tidal and play the best match.
@@ -612,6 +753,8 @@ class TidalPlayer:
 
     def _announce_track(self, track):
         """Announce a track with optional short mode."""
+        if not TTS_ANNOUNCE_PLAYBACK:
+            return
         if TTS_SHORT_ANNOUNCEMENTS:
             self.speak(track.name)
         else:
@@ -619,6 +762,8 @@ class TidalPlayer:
 
     def _announce_album(self, album):
         """Announce an album with optional short mode."""
+        if not TTS_ANNOUNCE_PLAYBACK:
+            return
         if TTS_SHORT_ANNOUNCEMENTS:
             self.speak(album.name)
         else:
@@ -626,6 +771,8 @@ class TidalPlayer:
 
     def _announce_playlist(self, playlist):
         """Announce a playlist with optional short mode."""
+        if not TTS_ANNOUNCE_PLAYBACK:
+            return
         if TTS_SHORT_ANNOUNCEMENTS:
             self.speak(playlist.name)
         else:
@@ -718,8 +865,10 @@ class TidalPlayer:
 
         if self.media_controller:
             try:
-                # Stop current playback
-                self.media_controller.stop()
+                try:
+                    self.media_controller.stop()
+                except Exception as e:
+                    logger.debug(f"Nothing to stop: {e}")  # no active media session, normal when idle
                 # Give time for stop to take effect
                 time.sleep(0.3)
                 # Launch default media receiver to clear any queue
@@ -746,10 +895,14 @@ class TidalPlayer:
         if self.media_controller:
             try:
                 # Get current position before pausing
-                self.media_controller.update_status()
+                # update_status() is asynchronous, so status.current_time is as old as the last
+                # status message; adjusted_current_time extrapolates it while playing.
                 status = self.media_controller.status
-                if status and status.current_time:
-                    self._paused_position = status.current_time
+                position = status.adjusted_current_time if status else None
+                if position is None and status:
+                    position = status.current_time
+                if position:
+                    self._paused_position = position
                     logger.debug(f"Stored pause position: {self._paused_position:.1f}s")
             except Exception as e:
                 logger.debug(f"Could not get pause position: {e}")
@@ -779,6 +932,7 @@ class TidalPlayer:
                         'audio/mp4',
                         title=self._current_track.name,
                         thumb=self._current_track.album.image(1280) if self._current_track.album else None,
+                        metadata=self._music_metadata(self._current_track),
                         current_time=self._paused_position
                     )
                     logger.info(f"Playback resumed at {self._paused_position:.1f}s")
@@ -824,6 +978,7 @@ class TidalPlayer:
                         'audio/mp4',
                         title=next_track.name,
                         thumb=next_track.album.image(1280) if next_track.album else None,
+                        metadata=self._music_metadata(next_track),
                     )
                     logger.info(f"Now playing: {next_track.name}")
                     return True

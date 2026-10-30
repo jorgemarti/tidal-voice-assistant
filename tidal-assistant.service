@@ -5,19 +5,21 @@ Wants=network-online.target
 
 [Service]
 Type=simple
-User=pi
-Group=pi
-WorkingDirectory=/home/pi/tidal-voice-assistant
-Environment="PATH=/home/pi/tidal-voice-assistant/venv/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
+User=cockemc
+Group=cockemc
+WorkingDirectory=/home/cockemc/tidal-voice-assistant
+Environment="PATH=/home/cockemc/tidal-voice-assistant/venv/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
+# Rotating log file next to the journal (5 x 5 MB): tail -f ~/tidal-voice-assistant/logs/assistant.log
+Environment="LOG_FILE=logs/assistant.log"
+Environment="PYTHONUNBUFFERED=1"
 
-# Load environment variables
-EnvironmentFile=/home/pi/tidal-voice-assistant/.env
+# Load environment variables (GEMINI_API_KEY, LASTFM_*, LOG_LEVEL)
+EnvironmentFile=/home/cockemc/tidal-voice-assistant/.env
 
-# Run the main application
-ExecStart=/home/pi/tidal-voice-assistant/venv/bin/python /home/pi/tidal-voice-assistant/main.py
+ExecStart=/home/cockemc/tidal-voice-assistant/venv/bin/python /home/cockemc/tidal-voice-assistant/main.py
 
-# Restart on failure
-Restart=on-failure
+# Restart always (arecord dying, Chromecast gone, unhandled errors)
+Restart=always
 RestartSec=10
 
 # Logging
