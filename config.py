@@ -116,9 +116,9 @@ GEMINI_MODEL = 'gemini-3.5-flash-lite'
 GEMINI_USE_AUDIO = True  # Send the command audio to Gemini; False sends only the Vosk transcript
 GEMINI_MAX_PER_HOUR = 40   # Hard caps on Gemini requests: a runaway of false wake triggers cannot drain the prepaid balance
 GEMINI_MAX_PER_DAY = 300
-# Artists the household asks for often. Sent to Gemini together with the Tidal favourites so it
-# recognises them in the audio (e.g. "Dàmaris Gelabert" was heard as "Els Amics de les Arts").
-KNOWN_ARTISTS = ['Dàmaris Gelabert', 'The Strokes', 'Queen', 'Rosalía', 'Manel', 'Dani Miquel', 'El Pot Petit']
+# Optional extra artists for Gemini's spelling aid, comma-separated in .env (KNOWN_ARTISTS=...). The library
+# already supplies the favourite and most played artists, so this is only for names not in it.
+KNOWN_ARTISTS = [a.strip() for a in os.environ.get('KNOWN_ARTISTS', '').split(',') if a.strip()]
 
 # The household library (Tidal favourites and playlists plus the Last.fm top of the last month) is matched
 # locally before the Tidal catalogue and sent to Gemini as a closed set of labels (see library.py).

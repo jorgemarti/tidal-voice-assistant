@@ -134,7 +134,7 @@ tidal-voice-assistant/
   - Wake word phrases (`WAKE_WORDS`) and Vosk model path
   - Command capture timing (`SPEECH_TIMEOUT`, `COMMAND_NO_SPEECH_TIMEOUT`, `AUDIO_PRE_WAKE_SECONDS`)
   - Audio capture (`AUDIO_DEVICE = "plughw:0,0"`, `SAMPLE_RATE = 16000`)
-  - Command parser (`COMMAND_PARSER`, `GEMINI_MODEL`, `GEMINI_USE_AUDIO`, `KNOWN_ARTISTS` as a spelling aid for Gemini)
+  - Command parser (`COMMAND_PARSER`, `GEMINI_MODEL`, `GEMINI_USE_AUDIO`, `KNOWN_ARTISTS` read from `.env`, optional spelling aid for Gemini)
   - TTS and cues (`TTS_ENGINE`, `TTS_ANNOUNCE_PLAYBACK = False`, `PLAYBACK_CUES = False`), autoplay and search cache settings
   - Last.fm (`LASTFM_SCROBBLE`, `LASTFM_SESSION_FILE`)
 

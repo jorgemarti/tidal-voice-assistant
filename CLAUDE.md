@@ -88,7 +88,7 @@ For a detailed visual representation of the system architecture, see [architectu
 
 ### 1.1 LLM Parser (`llm_parser.py`)
 - Sends only the command audio (WAV) to Google Gemini (`GEMINI_MODEL` `gemini-3.5-flash-lite`, `GEMINI_USE_AUDIO` True, thinking level minimal, JSON response). The local Vosk transcript is deliberately not sent in audio mode: it biased the model towards its own mistakes (for example "strauss" for The Strokes). With `GEMINI_USE_AUDIO = False` only the transcript is sent.
-- The prompt tells Gemini to keep titles and names in the language heard (Catalan, English, Portuguese), never to translate, never to add an artist it did not hear, and to answer `play_artist` for a bare artist name. `KNOWN_ARTISTS` (config) plus the library's artists are sent only as a spelling aid. The household library (`library.py`: favourites, own playlists, Last.fm top of the month) is sent as a closed set of labels, about 1,500 tokens; the model may copy one back as `library_match` and `Library.lookup` refuses anything not literally in the set, so the hint cannot become an invented artist.
+- The prompt tells Gemini to keep titles and names in the language heard (Catalan, English, Portuguese), never to translate, never to add an artist it did not hear, and to answer `play_artist` for a bare artist name. `KNOWN_ARTISTS` (optional, from `.env`) plus the library's artists are sent only as a spelling aid. The household library (`library.py`: favourites, own playlists, Last.fm top of the month) is sent as a closed set of labels, about 1,500 tokens; the model may copy one back as `library_match` and `Library.lookup` refuses anything not literally in the set, so the hint cannot become an invented artist.
 - Returns `{action, query, artist, artist_alternatives, transcript, library_match}`; the artist is kept separate from the query, `artist_alternatives` holds up to 2 guesses when the name was unclear
 - The last 10 command WAVs are kept in `/tmp/tidal-commands/` for debugging
 - Measured latency 1.4 to 2 s on the Pi
@@ -193,6 +193,7 @@ LOG_LEVEL=INFO  # Optional: DEBUG, INFO, WARNING, ERROR, CRITICAL
 GEMINI_API_KEY=  # Required for COMMAND_PARSER = 'gemini'
 LASTFM_API_KEY=  # Optional, Last.fm scrobbling (plus `python lastfm_auth.py` once)
 LASTFM_API_SECRET=
+KNOWN_ARTISTS=  # Optional, comma-separated extra artist names for Gemini's spelling aid
 # LOG_FILE is set by the systemd unit (logs/assistant.log), not in .env
 ```
 
@@ -226,7 +227,7 @@ SAMPLE_RATE = 16000
 COMMAND_PARSER = 'gemini'     # 'gemini' or 'regex'
 GEMINI_MODEL = 'gemini-3.5-flash-lite'
 GEMINI_USE_AUDIO = True       # Send the command audio; False sends only the Vosk transcript
-KNOWN_ARTISTS = [...]         # Spelling aid for Gemini, merged with the library's artists
+KNOWN_ARTISTS = [...]         # From KNOWN_ARTISTS in .env (comma-separated, optional); the library supplies the rest
 LIBRARY_REFRESH_HOURS = 24    # Household library (favourites, playlists, Last.fm top) refresh; LIBRARY_MATCH_SCORE 80, LIBRARY_HINT_* caps
 
 # TTS and cues
