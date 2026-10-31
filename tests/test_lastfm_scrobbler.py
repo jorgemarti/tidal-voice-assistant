@@ -70,3 +70,32 @@ def test_listener_ignores_unknown_media_and_tracks_changes():
     wait_threads()
     assert net.now_playing == [("The Strokes", "Last Nite")]
     assert net.scrobbles == [("The Strokes", "Last Nite")]
+
+
+def test_listener_extrapolates_position_between_status_updates():
+    """A track that plays through without pauses reports position 0 until it ends: the wall clock fills the gap."""
+    net = FakeNetwork()
+    s = LastFmScrobbler(network=net)
+    known = {"Sol Solecito": {"title": "Sol Solecito", "artist": "Toy Cantando", "album": None, "duration": 96}}
+    t = [1000.0]
+    listener = ScrobbleListener(s, lambda title, artist: known.get(title), clock=lambda: t[0])
+    listener.new_media_status(SimpleNamespace(player_state="PLAYING", content_id="u1", title="Sol Solecito", artist=None, current_time=0))
+    t[0] += 97
+    listener.new_media_status(SimpleNamespace(player_state="IDLE", content_id=None, title=None, artist=None, current_time=0))
+    wait_threads()
+    assert net.scrobbles == [("Toy Cantando", "Sol Solecito")]
+
+
+def test_listener_does_not_count_paused_time():
+    net = FakeNetwork()
+    s = LastFmScrobbler(network=net)
+    known = {"Last Nite": {"title": "Last Nite", "artist": "The Strokes", "album": None, "duration": 200}}
+    t = [0.0]
+    listener = ScrobbleListener(s, lambda title, artist: known.get(title), clock=lambda: t[0])
+    listener.new_media_status(SimpleNamespace(player_state="PLAYING", content_id="u1", title="Last Nite", artist=None, current_time=0))
+    t[0] += 20
+    listener.new_media_status(SimpleNamespace(player_state="PAUSED", content_id="u1", title="Last Nite", artist=None, current_time=20))
+    t[0] += 300
+    listener.new_media_status(SimpleNamespace(player_state="IDLE", content_id=None, title=None, artist=None, current_time=20))
+    wait_threads()
+    assert net.scrobbles == []

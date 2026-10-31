@@ -96,8 +96,11 @@ class LastFmScrobbler:
         if current_time is None:
             return
         with self._lock:
-            if self._current and current_time > self._current["last_time"]:
-                self._current["last_time"] = current_time
+            if self._current:
+                if self._current["duration"]:
+                    current_time = min(current_time, self._current["duration"])
+                if current_time > self._current["last_time"]:
+                    self._current["last_time"] = current_time
 
     def track_ended(self):
         """The current track stopped, was skipped or finished: scrobble it if it played enough."""
@@ -123,17 +126,29 @@ class ScrobbleListener:
 
     resolve(title, artist) returns {'title','artist','album','duration'} for a title the player queued,
     or None for other media (TTS, cues), which are ignored.
+
+    The Chromecast reports its status only on changes, not periodically, so a track that plays through
+    uninterrupted reports a position of 0 until it ends. The position reached is therefore extrapolated
+    from the previous status and the wall clock whenever a new status arrives.
     """
 
-    def __init__(self, scrobbler: LastFmScrobbler, resolve: Callable[[str, Optional[str]], Optional[dict]]):
+    def __init__(self, scrobbler: LastFmScrobbler, resolve: Callable[[str, Optional[str]], Optional[dict]], clock: Callable[[], float] = time.monotonic):
         self.scrobbler = scrobbler
         self.resolve = resolve
+        self.clock = clock
         self._content_id = None
+        self._last = None  # (current_time, clock reading, was playing) of the previous status
 
     def new_media_status(self, status):
         try:
             state = getattr(status, "player_state", None)
             content_id = getattr(status, "content_id", None)
+            now = self.clock()
+            if self._last and self._last[2]:
+                # Position the previous status reached while playing, before this change is applied
+                self.scrobbler.track_progress(self._last[0] + (now - self._last[1]))
+            current = getattr(status, "current_time", None)
+            self._last = (current, now, state == "PLAYING") if current is not None else None
             if state in ("PLAYING", "BUFFERING") and content_id and content_id != self._content_id:
                 self._content_id = content_id
                 title, artist = getattr(status, "title", None), getattr(status, "artist", None)
