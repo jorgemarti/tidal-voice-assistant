@@ -88,8 +88,8 @@ For a detailed visual representation of the system architecture, see [architectu
 
 ### 1.1 LLM Parser (`llm_parser.py`)
 - Sends only the command audio (WAV) to Google Gemini (`GEMINI_MODEL` `gemini-3.5-flash-lite`, `GEMINI_USE_AUDIO` True, thinking level minimal, JSON response). The local Vosk transcript is deliberately not sent in audio mode: it biased the model towards its own mistakes (for example "strauss" for The Strokes). With `GEMINI_USE_AUDIO = False` only the transcript is sent.
-- The prompt tells Gemini to keep titles and names in the language heard (Catalan, English, Portuguese), never to translate, never to add an artist it did not hear, and to answer `play_artist` for a bare artist name. `KNOWN_ARTISTS` (config) plus the Tidal favourite artists are sent only as a spelling aid.
-- Returns `{action, query, artist, artist_alternatives, transcript}`; the artist is kept separate from the query, `artist_alternatives` holds up to 2 guesses when the name was unclear
+- The prompt tells Gemini to keep titles and names in the language heard (Catalan, English, Portuguese), never to translate, never to add an artist it did not hear, and to answer `play_artist` for a bare artist name. `KNOWN_ARTISTS` (config) plus the library's artists are sent only as a spelling aid. The household library (`library.py`: favourites, own playlists, Last.fm top of the month) is sent as a closed set of labels, about 1,500 tokens; the model may copy one back as `library_match` and `Library.lookup` refuses anything not literally in the set, so the hint cannot become an invented artist.
+- Returns `{action, query, artist, artist_alternatives, transcript, library_match}`; the artist is kept separate from the query, `artist_alternatives` holds up to 2 guesses when the name was unclear
 - The last 10 command WAVs are kept in `/tmp/tidal-commands/` for debugging
 - Measured latency 1.4 to 2 s on the Pi
 - Needs `GEMINI_API_KEY` in `.env` (Gemini API billing is prepaid; HTTP 402 when the credit is depleted). Without it the parser is disabled.
@@ -118,7 +118,7 @@ For a detailed visual representation of the system architecture, see [architectu
 ### 4. Tidal Integration (`tidal_player.py`)
 - OAuth device flow authentication
 - Search API integration with caching
-- **`smart_search_and_play(query, search_type, artist=None, artist_alternatives=None)`**: picks the best Tidal candidate by fuzzy matching on accent-stripped text (fuzzywuzzy `token_set_ratio`), weighting the artist name 40% when known (`MATCH_GOOD_SCORE` 75 stops trying alternatives, below `MATCH_MIN_SCORE` 55 it says "No he encontrado..."). Tries the artist heard, then its alternatives, then the title alone. Playlists are looked up first in the user's own and favourited playlists (`session.user.playlists()` and `favorites.playlists()`), then in the public catalogue. A song query without artist that matches an artist name at 90+ plays the artist instead ("reproduce Pearl Jam").
+- **`smart_search_and_play(query, search_type, artist=None, artist_alternatives=None, library_match=None)`**: first `_play_from_library` (the label Gemini copied back, or a fuzzy hit at `LIBRARY_MATCH_SCORE` 80 or above against the household library, including a bare artist name at 90+) plays the exact favourite without searching; otherwise it picks the best Tidal candidate by fuzzy matching on accent-stripped text (fuzzywuzzy `token_set_ratio`), weighting the artist name 40% when known (`MATCH_GOOD_SCORE` 75 stops trying alternatives, below `MATCH_MIN_SCORE` 55 it says "No he encontrado..."). Tries the artist heard, then its alternatives, then the title alone. Playlists are looked up first in the user's own and favourited playlists (`session.user.playlists()` and `favorites.playlists()`), then in the public catalogue. A song query without artist that matches an artist name at 90+ plays the artist instead ("reproduce Pearl Jam").
 - **`pause()`** stores the extrapolated position (`status.adjusted_current_time`) so `play()` resumes where the track was, not from the start; **`stop()`** logs nothing alarming when nothing was playing
 - **`play_media` metadata**: every track is cast with `MusicTrack` metadata (artist, album) via `_music_metadata`, so the speaker reports what it plays (used by the scrobbler, survives restarts)
 - No spoken announcement before the music (`TTS_ANNOUNCE_PLAYBACK = False`); `speak()` is used for "No te he entendido", "No he encontrado..." and the token expiry warning
@@ -138,6 +138,11 @@ For a detailed visual representation of the system architecture, see [architectu
 ### 6. Last.fm Scrobbler (`lastfm_scrobbler.py`, optional)
 - `LastFmScrobbler` sends "now playing" when a track starts and scrobbles it once it played half its length or 4 minutes (tracks over 30 s only) via `pylast`, with a guard against double scrobbles on resume; `ScrobbleListener` is registered as a pychromecast media status listener in `find_chromecast`, so autoplay, skips, pauses and resumes are tracked from what the speaker reports. The Chromecast only reports status on changes, so the position reached is extrapolated from the previous status and the wall clock (a track that plays through reports 0 until it ends). `_track_info_for` resolves the title against the internal queue; a track not in the queue (queued before a restart) is trusted from the Chromecast's own metadata. TTS and cues carry no artist and are ignored.
 - Needs `LASTFM_API_KEY` and `LASTFM_API_SECRET` in `.env` and `lastfm_session.json` (gitignored) from a one-time `python lastfm_auth.py` (desktop auth flow, polls until approved). `LASTFM_SCROBBLE` in `config.py` turns it off. Tidal itself exposes no listening history.
+
+### 6.1 Household library (`library.py`)
+- `Library(session, lastfm_network)` collects the Tidal favourite tracks, albums, artists and playlists (paginated, up to 500 per kind), the user's own playlists, and the Last.fm top 50 tracks and top 30 artists of the last month (`LASTFM_TOP_TRACKS`, `LASTFM_TOP_ARTISTS`). Cached in `LIBRARY_FILE` (`library.json`, gitignored, excluded from deploy) and refreshed every `LIBRARY_REFRESH_HOURS` (24) in a daemon thread; the first run without a cache refreshes synchronously (about 7 s).
+- Entries are `{kind, name, artist, id, source, plays}`; the label shown to Gemini is `Name (Artist)` for tracks and albums, the bare name otherwise. `match` uses the same normalisation and `token_set_ratio` scoring as the catalogue matcher; `hint_text` lists playlists, then tracks, albums and artists, most played first, capped by `LIBRARY_HINT_*`.
+- Measured on 2026-10-31: 48 favourite tracks, 31 albums, 22 artists, 36 playlists plus 18 extra tracks and 15 artists from Last.fm; hint about 4,500 characters.
 
 ### 7. Versioning, deployment and logging
 - `VERSION` (semantic versioning, 2.0.0) is read by `config.py` as `VERSION`, logged at startup ("Tidal Voice Assistant v2.0.0 starting") and printed by `python main.py --version`. Bump it and tag the release (`git tag v2.0.0`).
@@ -221,7 +226,8 @@ SAMPLE_RATE = 16000
 COMMAND_PARSER = 'gemini'     # 'gemini' or 'regex'
 GEMINI_MODEL = 'gemini-3.5-flash-lite'
 GEMINI_USE_AUDIO = True       # Send the command audio; False sends only the Vosk transcript
-KNOWN_ARTISTS = [...]         # Spelling aid for Gemini, merged with the Tidal favourite artists
+KNOWN_ARTISTS = [...]         # Spelling aid for Gemini, merged with the library's artists
+LIBRARY_REFRESH_HOURS = 24    # Household library (favourites, playlists, Last.fm top) refresh; LIBRARY_MATCH_SCORE 80, LIBRARY_HINT_* caps
 
 # TTS and cues
 TTS_ENGINE = 'google'         # 'google' (recommended) or 'local' (pyttsx3)
@@ -302,6 +308,7 @@ For non-music commands, user continues using:
 - [x] Energy-based end of speech, early cue, re-prompt and debug WAVs (2026-10-30)
 - [x] Last.fm scrobbling (2026-10-30)
 - [x] Versioning (`VERSION`), `deploy.sh`, rotating log file (2026-10-30)
+- [x] Household library matched before the catalogue and sent to Gemini as a closed set (2026-10-31)
 - [ ] Volume control via voice
 
 ### Phase 3: Advanced Features
@@ -398,12 +405,13 @@ tidal-voice-assistant/
 ├── tidal_player.py             # Tidal + Chromecast
 ├── tidal_auth.py               # Tidal authentication
 ├── lastfm_scrobbler.py         # Last.fm scrobbling (optional, from Chromecast media status)
+├── library.py                  # Household library: favourites, playlists, Last.fm top (matched first, closed set for Gemini)
 ├── lastfm_auth.py              # One-time Last.fm authorisation
 ├── tts_engine.py               # TTS engine (Google or local pyttsx3)
 ├── utils.py                    # Utility functions and decorators
 ├── test_chromecast.py          # Chromecast testing
 ├── test_tidal.py               # Tidal testing
-├── tests/                      # Unit tests (command parser, phonetic matcher, Last.fm scrobbler)
+├── tests/                      # Unit tests (command parser, phonetic matcher, Last.fm scrobbler, library)
 ├── requirements.txt            # Python deps
 ├── .env.example                # Environment template
 ├── setup.sh                    # Setup script for the Pi

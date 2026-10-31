@@ -32,6 +32,10 @@ tidal_session.json
 # Last.fm session
 lastfm_session.json
 
+# Library cache (favourites, playlists, Last.fm top), rebuilt on the Pi
+library.json
+library.json.tmp
+
 # Vosk models (large files)
 vosk-model-*/
 *.zip

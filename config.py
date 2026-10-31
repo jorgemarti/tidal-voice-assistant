@@ -120,6 +120,17 @@ GEMINI_MAX_PER_DAY = 300
 # recognises them in the audio (e.g. "Dàmaris Gelabert" was heard as "Els Amics de les Arts").
 KNOWN_ARTISTS = ['Dàmaris Gelabert', 'The Strokes', 'Queen', 'Rosalía', 'Manel', 'Dani Miquel', 'El Pot Petit']
 
+# The household library (Tidal favourites and playlists plus the Last.fm top of the last month) is matched
+# locally before the Tidal catalogue and sent to Gemini as a closed set of labels (see library.py).
+LIBRARY_FILE = 'library.json'
+LIBRARY_REFRESH_HOURS = 24
+LIBRARY_MATCH_SCORE = 80    # fuzzy score needed to play a library entry without searching the catalogue
+LIBRARY_HINT_TRACKS = 120   # labels per kind in the Gemini prompt (about 1,500 tokens in total)
+LIBRARY_HINT_ALBUMS = 40
+LIBRARY_HINT_ARTISTS = 80
+LASTFM_TOP_TRACKS = 50      # most played in the last month, from the scrobbles
+LASTFM_TOP_ARTISTS = 30
+
 # TTS Configuration
 TTS_ENGINE = 'google'  # Options: 'google' (Google Translate TTS), 'local' (pyttsx3, offline)
 TTS_LOCAL_RATE = 175  # Speech rate for local TTS (words per minute)

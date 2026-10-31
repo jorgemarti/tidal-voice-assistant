@@ -15,7 +15,7 @@ HERE="$(cd "$(dirname "$0")" && pwd)"
 echo "Deploying v$(cat "$HERE/VERSION") to $PI_HOST:~/$REMOTE_DIR"
 rsync -a --delete \
   --exclude venv --exclude 'vosk-model*' --exclude '.env' \
-  --exclude tidal_session.json --exclude lastfm_session.json \
+  --exclude tidal_session.json --exclude lastfm_session.json --exclude 'library.json*' \
   --exclude logs --exclude __pycache__ --exclude .git --exclude '.claude' \
   "$HERE/" "$PI_HOST:~/$REMOTE_DIR/"
 

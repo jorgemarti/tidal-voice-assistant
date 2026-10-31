@@ -22,6 +22,7 @@ tidal-voice-assistant/
 │
 ├── tidal_auth.py               # Tidal OAuth authentication
 ├── lastfm_scrobbler.py         # Last.fm scrobbling (optional)
+├── library.py                  # Household library (favourites, playlists, Last.fm top): matched first, closed set for Gemini
 ├── lastfm_auth.py              # One-time Last.fm authorisation
 ├── audio_processor.py          # ALSA capture (arecord), Vosk wake word, energy-based end of speech
 ├── llm_parser.py               # Gemini command parser (command audio)
@@ -36,6 +37,7 @@ tidal-voice-assistant/
 ├── tests/                      # Unit tests (python -m pytest tests -q)
 │   ├── test_command_parser.py
 │   ├── test_lastfm_scrobbler.py
+│   ├── test_library.py
 │   └── test_phonetic_matcher.py
 │
 ├── tidal-assistant.service     # Systemd service for auto-start
@@ -226,6 +228,11 @@ tidal-voice-assistant/
 - Registers `ScrobbleListener` on the media controller in `find_chromecast()` when Last.fm is enabled
 - Integrates: tidalapi + pychromecast
 
+**library.py**
+- `Library` holds the household's music: Tidal favourite tracks, albums, artists and playlists, the user's own playlists, and the Last.fm top tracks and artists of the last month. `start()` loads `library.json` (or refreshes synchronously the first time) and refreshes every `LIBRARY_REFRESH_HOURS` in a daemon thread.
+- `match(query, kind, artist)` is the same fuzzy scoring as the player's catalogue match; `lookup(label)` accepts only labels that exist (the closed set Gemini may copy back as `library_match`); `hint_text()` is the bounded prompt block, most played first; `artist_names()` feeds the spelling aid.
+- `TidalPlayer._play_from_library` plays a hit at `LIBRARY_MATCH_SCORE` or above before any catalogue search; Last.fm entries carry no Tidal id and are resolved by one search.
+
 **lastfm_scrobbler.py**
 - Optional Last.fm scrobbling via `pylast`; Tidal exposes no listening history
 - Class `LastFmScrobbler`: `track_started()` sends "now playing"; `track_ended()` scrobbles once the track played half its length or 4 minutes (`should_scrobble`, tracks over 30 s only), with a guard against scrobbling the same play twice after a pause and resume
@@ -268,7 +275,7 @@ tidal-voice-assistant/
 - Validates Tidal authentication and API access
 
 **tests/**
-- pytest unit tests: `test_command_parser.py` (regex parser), `test_phonetic_matcher.py`, `test_lastfm_scrobbler.py` (4 tests: scrobble rules, scrobble after enough play, no double scrobble on resume, listener ignores unknown media)
+- pytest unit tests: `test_command_parser.py` (regex parser), `test_phonetic_matcher.py`, `test_lastfm_scrobbler.py` (6 tests: scrobble rules, scrobble after enough play, no double scrobble on resume, listener ignores unknown media, position extrapolated between status updates, paused time not counted), `test_library.py` (6 tests: normalisation and labels, fuzzy match by kind, lookup refuses labels outside the library, hint text and artist names, dedupe, save/load)
 - Run with `python -m pytest tests -q`. `test_pon_song` in the command parser tests fails (pre-existing, affects only the regex fallback)
 
 ### Service Configuration

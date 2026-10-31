@@ -13,7 +13,9 @@ from fuzzywuzzy import fuzz
 from phonetic_matcher import PhoneticMatcher
 from tts_engine import get_tts_engine
 from lastfm_scrobbler import LastFmScrobbler, ScrobbleListener
+from library import Library, label_of, norm as _norm_text
 from config import (
+    LIBRARY_MATCH_SCORE,
     CHROMECAST_NAME, TIDAL_CONFIG, setup_logging,
     RETRY_MAX_ATTEMPTS, RETRY_DELAY_SECONDS, RETRY_BACKOFF_MULTIPLIER,
     AUTOPLAY_ENABLED, AUTOPLAY_TRACK_COUNT,
@@ -114,6 +116,8 @@ class TidalPlayer:
             raise RuntimeError("Failed to load Tidal session")
 
         logger.info("Tidal session loaded successfully")
+        self.library = Library(self.session, self._scrobbler.network)
+        self.library.start()
 
     def play_audio_cue(self, cue_type: str = 'wake'):
         """
@@ -605,9 +609,7 @@ class TidalPlayer:
 
     @staticmethod
     def _norm(text):
-        text = unicodedata.normalize('NFKD', text or '')
-        text = ''.join(c for c in text if not unicodedata.combining(c))
-        return ''.join(c if c.isalnum() or c.isspace() else ' ' for c in text.lower()).strip()
+        return _norm_text(text)
 
     def _best_match(self, results, query, search_type, artist=None):
         best, best_score = None, -1
@@ -631,25 +633,74 @@ class TidalPlayer:
                 logger.debug(f"Could not list user playlists: {e}")
         return playlists
 
-    def favourite_artist_names(self, limit=100):
-        """Names of the favourited artists plus the artists of favourited tracks (context for the LLM)."""
-        names = []
+    def _library_object(self, entry):
+        """The Tidal object for a library entry. Last.fm entries carry no id and are resolved by search."""
+        kind = entry["kind"]
         try:
-            names += [a.name for a in self.session.user.favorites.artists(limit=limit)]
-            names += [t.artist.name for t in self.session.user.favorites.tracks(limit=limit)]
+            if entry.get("id"):
+                getter = {"track": self.session.track, "album": self.session.album, "artist": self.session.artist, "playlist": self.session.playlist}[kind]
+                return getter(entry["id"])
+            if kind == "track":
+                found = self.search_tidal(f"{entry['name']} {entry.get('artist') or ''}".strip(), 'track', limit=5)
+                best, score = self._best_match(found or [], entry["name"], 'track', entry.get("artist"))
+                return best if score >= self.MATCH_GOOD_SCORE else None
+            if kind == "artist":
+                found = self.search_tidal(entry["name"], 'artist', limit=5)
+                best, score = self._best_match(found or [], entry["name"], 'artist')
+                return best if score >= 90 else None
         except Exception as e:
-            logger.debug(f"Could not read Tidal favourites: {e}")
-        return list(dict.fromkeys(n for n in names if n))
+            logger.warning(f"Could not load library {kind} '{entry['name']}': {e}")
+        return None
 
-    def smart_search_and_play(self, query, search_type='track', artist=None, artist_alternatives=None):
+    def _play_object(self, obj, kind):
+        if kind == 'track':
+            self._announce_track(obj)
+            return self.play_track_with_autoplay(obj)
+        if kind == 'artist':
+            return self.play_artist_top_tracks(obj)
+        if kind == 'album':
+            self._announce_album(obj)
+            return self.play_album(obj)
+        if kind == 'playlist':
+            self._announce_playlist(obj)
+            return self.play_playlist(obj)
+        return False
+
+    def _play_from_library(self, query, search_type, artist=None, library_match=None):
+        """Play a library entry when the query clearly is one: the label Gemini copied back, or a fuzzy hit."""
+        entry, score = self.library.lookup(library_match), 100
+        if entry:
+            logger.info(f"Gemini matched the library: {entry['kind']} '{label_of(entry)}'")
+        else:
+            entry, score = self.library.match(query, search_type, artist)
+            if search_type == 'track' and not artist:
+                # "reproduce Pearl Jam": a bare name that is one of the library's artists
+                a_entry, a_score = self.library.match(query, 'artist')
+                if a_entry and a_score >= 90 and a_score > score:
+                    entry, score = a_entry, a_score
+            if not entry or score < LIBRARY_MATCH_SCORE:
+                if entry:
+                    logger.debug(f"Best library {entry['kind']} for '{query}': '{label_of(entry)}' ({score:.0f}), below {LIBRARY_MATCH_SCORE}")
+                return False
+            logger.info(f"Library hit: {entry['kind']} '{label_of(entry)}' ({score:.0f}) for '{query}'")
+        obj = self._library_object(entry)
+        if not obj:
+            logger.debug("Library entry could not be loaded, searching the catalogue")
+            return False
+        return self._play_object(obj, entry['kind'])
+
+    def smart_search_and_play(self, query, search_type='track', artist=None, artist_alternatives=None, library_match=None):
         """
-        Search Tidal with a clean query (title or name) and an optional artist, pick the best
-        candidate by fuzzy matching and play it. Playlists are looked up in the user's own
-        library before the public catalogue.
+        Play what the user asked for: first a matching entry of the household library (favourites,
+        playlists, Last.fm top), then the best Tidal candidate by fuzzy matching on a clean query
+        (title or name) and an optional artist. `library_match` is the library label Gemini copied back.
         """
         if not self.cast_device and not self.find_chromecast():
             return False
         self.clear_queue()
+
+        if self._play_from_library(query, search_type, artist, library_match):
+            return True
 
         results = None
         if search_type == 'playlist':
@@ -700,19 +751,7 @@ class TidalPlayer:
             self.speak(f"No he encontrado {query}" + (f" de {artist}" if artist else ''))
             return False
         logger.info(f"Selected {search_type} '{best.name}' (score {score:.0f}) for '{query}'" + (f" by '{artist}'" if artist else ''))
-
-        if search_type == 'track':
-            self._announce_track(best)
-            return self.play_track_with_autoplay(best)
-        elif search_type == 'artist':
-            return self.play_artist_top_tracks(best)
-        elif search_type == 'album':
-            self._announce_album(best)
-            return self.play_album(best)
-        elif search_type == 'playlist':
-            self._announce_playlist(best)
-            return self.play_playlist(best)
-        return False
+        return self._play_object(best, search_type)
 
     def search_and_play(self, query, search_type='track'):
         """

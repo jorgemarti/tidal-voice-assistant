@@ -28,7 +28,9 @@ PROMPT = (
     "query (el título de la canción, nombre del artista, álbum o playlist tal como lo diría el usuario, en su idioma original, o null), "
     "artist (artista si se menciona además del título, o null), "
     "artist_alternatives (lista de hasta 2 artistas alternativos si no estás seguro de haber entendido bien el nombre, o []), "
-    "transcript (transcripción literal de la orden). "
+    "transcript (transcripción literal de la orden), "
+    "library_match (si la orden se refiere claramente a una entrada de la biblioteca del usuario que se adjunta, esa entrada copiada "
+    "literalmente, letra por letra; si no, null. La biblioteca solo sirve para rellenar library_match: nunca cambies query, artist ni transcript por ella). "
     "Conserva títulos y nombres en el idioma en que se oyen (catalán, inglés, portugués...), nunca los traduzcas a ningún idioma: "
     "'bon dia' se devuelve como 'Bon dia' y 'mi caballo percherón' se devuelve en español tal cual. "
     "Muchos artistas son internacionales (The Strokes, Queen, Rosalía): fíate del audio. "
@@ -43,9 +45,9 @@ PROMPT = (
 
 
 class LLMCommandParser:
-    def __init__(self, known_artists=None):
+    def __init__(self, library=None):
         self.client = None
-        self.known_artists = list(dict.fromkeys(list(KNOWN_ARTISTS) + list(known_artists or [])))
+        self.library = library  # library.Library: labels for the prompt and the closed set for library_match
         self._requests = []  # timestamps of the requests made, for the hourly and daily caps
         key = os.environ.get("GEMINI_API_KEY")
         if not key:
@@ -130,9 +132,13 @@ class LLMCommandParser:
             return None
         from google.genai import types
         contents = [PROMPT]
-        if self.known_artists:
+        known = list(dict.fromkeys(list(KNOWN_ARTISTS) + (self.library.artist_names() if self.library else [])))
+        if known:
             contents.append("Artistas que esta familia escucha a menudo, solo para acertar la grafía si el audio se parece mucho a uno de ellos. "
-                            "Nunca añadas un artista que no se oiga ni adaptes el título a su repertorio o idioma: " + ", ".join(self.known_artists))
+                            "Nunca añadas un artista que no se oiga ni adaptes el título a su repertorio o idioma: " + ", ".join(known))
+        hint = self.library.hint_text() if self.library else ""
+        if hint:
+            contents.append("Biblioteca del usuario (favoritos, playlists y lo más escuchado), una entrada por elemento separadas por punto y coma:\n" + hint)
         hint = command.get("transcript") or ""
         if GEMINI_USE_AUDIO and command.get("audio"):
             # The local Vosk transcript is deliberately not sent: with foreign names it biases the
@@ -164,4 +170,9 @@ class LLMCommandParser:
         action = data.get("action") if data.get("action") in ACTIONS else "unknown"
         # 'unknown' is an answer (the model heard it and it is not a music command), not a failure
         alts = [a for a in (data.get("artist_alternatives") or []) if isinstance(a, str) and a]
-        return {"action": action, "query": data.get("query"), "artist": data.get("artist"), "artist_alternatives": alts[:2], "transcript": data.get("transcript")}
+        match = data.get("library_match") if isinstance(data.get("library_match"), str) else None
+        if match and not (self.library and self.library.lookup(match)):
+            logger.info(f"library_match '{match}' is not in the library: ignored")
+            match = None
+        return {"action": action, "query": data.get("query"), "artist": data.get("artist"), "artist_alternatives": alts[:2],
+                "transcript": data.get("transcript"), "library_match": match}

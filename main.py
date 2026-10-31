@@ -22,7 +22,7 @@ logger.info(f"Tidal Voice Assistant v{VERSION} starting")
 # Instantiate components that will be used in callbacks
 command_parser = MusicCommandParser()
 tidal_player = TidalPlayer()
-llm_parser = LLMCommandParser(known_artists=tidal_player.favourite_artist_names()) if COMMAND_PARSER == 'gemini' else None
+llm_parser = LLMCommandParser(library=tidal_player.library) if COMMAND_PARSER == 'gemini' else None
 
 def print_banner():
     """Print application banner"""
@@ -172,7 +172,7 @@ def on_command_received(command):
         search_type = command_parser.get_search_type(action)
         query = parsed.get('query')
         if query:
-            success = tidal_player.smart_search_and_play(query, search_type, artist=parsed.get('artist'), artist_alternatives=parsed.get('artist_alternatives'))
+            success = tidal_player.smart_search_and_play(query, search_type, artist=parsed.get('artist'), artist_alternatives=parsed.get('artist_alternatives'), library_match=parsed.get('library_match'))
             if not success:
                 logger.error(f"Failed to play '{query}'")
         else:

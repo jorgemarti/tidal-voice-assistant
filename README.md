@@ -236,6 +236,13 @@ sudo alsactl store
 
 The assistant opens the device set in `AUDIO_DEVICE` (`plughw:0,0` by default) directly, so no `~/.asoundrc` is needed.
 
+## 📚 Household library (favourites first)
+
+Most requests are for something the household already listens to, so the assistant keeps a local library: your Tidal favourite tracks, albums, artists and playlists, your own playlists, and the 50 most played tracks and 30 most played artists of the last month from Last.fm (so it learns from what the Pi itself plays). It is refreshed every 24 hours in the background and cached in `library.json` (gitignored).
+
+- The spoken query is matched against the library first (fuzzy, no tokens). A hit at `LIBRARY_MATCH_SCORE` (80) or above plays that exact Tidal track, album, artist or playlist without searching the catalogue, so "reproduce patufet" plays the version you favourited instead of the first catalogue result.
+- The library is also sent to Gemini as a closed set of labels (about 1,500 tokens, bounded by `LIBRARY_HINT_TRACKS`, `LIBRARY_HINT_ALBUMS` and `LIBRARY_HINT_ARTISTS` in `config.py`). The model may copy one label back as `library_match`; anything that is not literally in the library is ignored, so the hint cannot turn into an invented artist. The transcript stays literal.
+
 ## 🎧 Last.fm Scrobbling (optional)
 
 Tidal does not expose any listening history, and it never learns what the Pi plays (the assistant only fetches stream URLs). The assistant can scrobble what the speaker plays to Last.fm instead, following the Last.fm rules: "now playing" when a track starts, and a scrobble once it has played half its length or four minutes. Tracks shorter than 30 seconds, TTS messages and cues are ignored. Track changes, autoplay, skips and pauses are read from the Chromecast's own media status, so nothing is counted that did not actually play.
@@ -355,6 +362,7 @@ tidal-voice-assistant/
 ├── tidal_player.py             # Tidal API and Chromecast integration
 ├── tidal_auth.py               # Tidal authentication
 ├── lastfm_scrobbler.py         # Last.fm scrobbling from the Chromecast media status (optional)
+├── library.py                  # Household library (favourites, playlists, Last.fm top) matched before the catalogue
 ├── lastfm_auth.py              # One-time Last.fm authorisation
 ├── tts_engine.py               # TTS engine (local pyttsx3 or Google)
 ├── utils.py                    # Utility functions and decorators
@@ -363,6 +371,7 @@ tidal-voice-assistant/
 ├── tests/                       # Unit tests (python -m pytest tests -q)
 │   ├── test_command_parser.py
 │   ├── test_lastfm_scrobbler.py
+│   ├── test_library.py
 │   └── test_phonetic_matcher.py
 ├── tidal-assistant.service     # Systemd service file
 ├── logs/                        # Rotating log file when LOG_FILE is set (gitignored)
