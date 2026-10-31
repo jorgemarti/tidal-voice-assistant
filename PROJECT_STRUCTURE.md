@@ -4,7 +4,6 @@
 tidal-voice-assistant/
 │
 ├── README.md                    # Main documentation and setup guide
-├── CLAUDE.md                    # Project context for coding assistants
 ├── PROJECT_STRUCTURE.md         # This file: detailed project structure
 ├── improvements.md              # Future improvement ideas
 ├── architecture.svg             # System architecture diagram
@@ -67,12 +66,6 @@ tidal-voice-assistant/
 - Shows complete data flow from voice input to audio output
 - Includes Raspberry Pi components, Tidal API, and Google Nest Mini
 - Color-coded components and clear connection arrows
-
-**CLAUDE.md**
-- Project context for coding assistants
-- Contains requirements and conversation history
-- Technical architecture details
-- Development priorities and roadmap
 
 **PROJECT_STRUCTURE.md** (this file)
 - Detailed breakdown of project files
@@ -446,7 +439,7 @@ git tag v2.0.0
 
 ## Future Enhancements
 
-See CLAUDE.md for detailed roadmap. Key items:
+See `improvements.md` for the detailed roadmap. Key items:
 - Volume control via voice
 - Web interface
 - Multi-language (Catalan)

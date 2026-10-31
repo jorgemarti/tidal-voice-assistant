@@ -624,7 +624,7 @@ class TidalPlayer:
         return best, best_score
 
     def _user_playlists(self):
-        """Jorge's own playlists plus the ones he favourited."""
+        """The user's own playlists plus the favourited ones."""
         playlists = []
         for getter in (lambda: self.session.user.playlists(), lambda: self.session.user.favorites.playlists()):
             try:

@@ -63,3 +63,7 @@ logs/
 # Temporary files
 temp/
 tmp/
+
+# Claude Code context (private, says too much for a public repo)
+CLAUDE.md
+.claude/

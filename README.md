@@ -344,7 +344,6 @@ Tidal tokens auto-refresh, but the refresh token expires (~30 days). When this h
 ```
 tidal-voice-assistant/
 ├── README.md                    # This file
-├── CLAUDE.md                    # Project context for coding assistants
 ├── PROJECT_STRUCTURE.md         # Detailed file descriptions
 ├── improvements.md              # Future improvement ideas
 ├── architecture.svg             # Architecture diagram
