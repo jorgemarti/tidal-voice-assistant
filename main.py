@@ -85,6 +85,17 @@ def _control_from(text):
     return local if local and local['action'] in ('stop', 'pause', 'resume', 'skip') else None
 
 
+CONTROL_WORDS = {"para", "stop", "pausa", "siguiente", "salta", "sigue", "continúa", "continua"}
+
+
+def _leading_control(text):
+    """A control command when the first word after the wake phrase is one ("okey música para, ... zapatos")."""
+    toks = _after_wake(text).split()
+    if toks and toks[0] in CONTROL_WORDS:
+        return command_parser.parse(toks[0])
+    return None
+
+
 def _is_wake_or_stub(text):
     """True when Gemini heard nothing beyond the wake phrase or a single word."""
     return len(_after_wake(text).split()) <= 1
@@ -116,6 +127,12 @@ def on_command_received(command):
                 return None
             parsed = None
             command['transcript'] = ''  # do not let the local transcript second-guess the model
+        elif parsed and parsed['action'] not in ('stop', 'pause', 'resume', 'skip'):
+            lead = _leading_control(parsed.get('transcript'))
+            if lead:
+                # "okey música para" followed by someone else talking: the control word said first wins
+                logger.info(f"Control word '{lead['action']}' right after the wake phrase overrides {parsed['action']}")
+                parsed = lead
     transcript = (command.get('transcript') or '').strip()
     if not parsed and transcript:
         parsed = command_parser.parse(transcript)

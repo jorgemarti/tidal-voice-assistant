@@ -107,16 +107,20 @@ class AudioProcessor:
         """
         audio = self._audio_since(int(WAKE_CONFIRM_SECONDS * 1000 / CHUNK_MS))
         rec = KaldiRecognizer(self.model, SAMPLE_RATE, self.grammar)
-        texts = []
+        finals, partials = [], []
         for i in range(0, len(audio), CHUNK_BYTES):
             if rec.AcceptWaveform(audio[i:i + CHUNK_BYTES]):
-                texts.append(json.loads(rec.Result()).get("text", ""))
+                finals.append(json.loads(rec.Result()).get("text", ""))
             else:
-                texts.append(json.loads(rec.PartialResult()).get("partial", ""))
-        texts.append(json.loads(rec.FinalResult()).get("text", ""))
-        heard = [t for t in texts if t]
+                partials.append(json.loads(rec.PartialResult()).get("partial", ""))
+        finals.append(json.loads(rec.FinalResult()).get("text", ""))
+        # Only a final result counts. Partial hypotheses briefly contain the phrase in ordinary
+        # conversation ("oye papi", "o bien") and every one of the 5 false triggers on 2026-10-31
+        # was a partial-only hit, while all 8 real wakes had the phrase in the final.
+        heard = [t for t in finals if t]
         ok = any(any(phrase in t for phrase in self.wake_phrases) for t in heard)
-        logger.debug(f"Wake re-decode {'confirmed' if ok else 'REJECTED'}: {sorted(set(heard))[-3:]}")
+        seen = sorted(set(heard or [t for t in partials if t]))[-3:]
+        logger.debug(f"Wake re-decode {'confirmed' if ok else 'REJECTED'}{'' if heard else ' (partial only)'}: {seen}")
         return ok
 
     def _wake_in(self, text: str) -> bool:
