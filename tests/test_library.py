@@ -65,3 +65,11 @@ def test_save_and_load_roundtrip(tmp_path):
     other = Library(path=lib.path)
     assert other.load() and other.refreshed_at == 1000.0 and len(other.entries) == 5
     assert json.load(open(lib.path))["entries"][0]["name"] == "En Patufet"
+
+
+def test_paged_keeps_going_after_short_pages():
+    """Tidal hides unavailable items, so pages come back with 47-49 of 50: only an empty page ends the list."""
+    data = list(range(140))
+    pages = {0: data[0:48], 50: data[50:97], 100: data[100:140], 150: []}
+    got = Library()._paged(lambda limit, offset: pages.get(offset, []))
+    assert len(got) == 48 + 47 + 40

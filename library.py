@@ -117,12 +117,14 @@ class Library:
         logger.info(f"Library refreshed in {time.time() - t0:.0f}s: {self.summary()}")
 
     def _paged(self, getter):
+        # Tidal drops unavailable items from each page, so a short page is not the last one:
+        # only an empty page is.
         items, offset = [], 0
         while offset < MAX_FAVOURITES:
             page = getter(limit=PAGE, offset=offset) or []
-            items += page
-            if len(page) < PAGE:
+            if not page:
                 break
+            items += page
             offset += PAGE
         return items
 
