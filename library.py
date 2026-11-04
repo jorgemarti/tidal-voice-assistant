@@ -119,12 +119,15 @@ class Library:
     def _paged(self, getter):
         # Tidal drops unavailable items from each page, so a short page is not the last one:
         # only an empty page is.
-        items, offset = [], 0
+        # Some endpoints (favourite playlists) ignore the offset and return the same page again.
+        items, offset, seen = [], 0, set()
         while offset < MAX_FAVOURITES:
             page = getter(limit=PAGE, offset=offset) or []
-            if not page:
+            fresh = [i for i in page if getattr(i, "id", id(i)) not in seen]
+            if not fresh:
                 break
-            items += page
+            seen.update(getattr(i, "id", id(i)) for i in fresh)
+            items += fresh
             offset += PAGE
         return items
 

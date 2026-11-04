@@ -73,3 +73,12 @@ def test_paged_keeps_going_after_short_pages():
     pages = {0: data[0:48], 50: data[50:97], 100: data[100:140], 150: []}
     got = Library()._paged(lambda limit, offset: pages.get(offset, []))
     assert len(got) == 48 + 47 + 40
+
+
+def test_paged_stops_when_the_offset_is_ignored():
+    """Favourite playlists come back identical whatever the offset: stop instead of looping to the cap."""
+    from types import SimpleNamespace
+    page = [SimpleNamespace(id=f"p{i}") for i in range(36)]
+    calls = []
+    got = Library()._paged(lambda limit, offset: calls.append(offset) or page)
+    assert len(got) == 36 and calls == [0, 50]
