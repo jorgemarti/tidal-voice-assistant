@@ -5,6 +5,7 @@ Gemini command parser: sends the command audio (WAV) to Gemini and gets back a s
 
 import io
 import json
+import re
 import os
 import time
 import wave
@@ -17,6 +18,17 @@ logger = setup_logging(__name__)
 
 COMMAND_WAV_DIR = "/tmp/tidal-commands"  # last utterances kept for offline debugging
 COMMAND_WAV_KEEP = 10
+
+# A play request must contain a command verb. Without one, the "title" is usually someone else's sentence
+# (a meeting in English became play_song "Feelin' the Responsibility" after a false wake on 2026-11-06).
+COMMAND_VERB_RE = re.compile(
+    r"\b(reproduce|reprodúceme|reproducir|reproduzca|pon|ponme|pónme|poner|pones|quiero (?:oír|oir|escuchar)|escuchar|"
+    r"toca|tócame|play|posa|posa'm|posam|fica|reprodueix)\b", re.IGNORECASE)
+
+
+def has_command_verb(transcript) -> bool:
+    return bool(COMMAND_VERB_RE.search(transcript or ""))
+
 
 ACTIONS = {"play_song", "play_artist", "play_album", "play_playlist", "stop", "pause", "resume", "skip", "unknown"}
 

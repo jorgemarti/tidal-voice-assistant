@@ -6,7 +6,7 @@ Tidal Voice Assistant - Main Application (Refactored)
 from audio_processor import AudioProcessor
 from command_parser import MusicCommandParser
 from tidal_player import TidalPlayer
-from llm_parser import LLMCommandParser
+from llm_parser import LLMCommandParser, has_command_verb
 from config import setup_logging, CHROMECAST_PRECONNECT, COMMAND_PARSER, PLAYBACK_CUES, SPEAK_NOT_UNDERSTOOD, VERSION
 import re
 import sys
@@ -133,6 +133,11 @@ def on_command_received(command):
                 # "okey música para" followed by someone else talking: the control word said first wins
                 logger.info(f"Control word '{lead['action']}' right after the wake phrase overrides {parsed['action']}")
                 parsed = lead
+            elif not has_command_verb(parsed.get('transcript')):
+                # No "reproduce"/"pon"/"play": a conversation sentence taken for a title, never play it
+                logger.warning(f"No command verb in '{parsed.get('transcript')}': ignoring {parsed['action']} '{parsed.get('query')}'")
+                resume_if_needed()
+                return None
     transcript = (command.get('transcript') or '').strip()
     if not parsed and transcript:
         parsed = command_parser.parse(transcript)
